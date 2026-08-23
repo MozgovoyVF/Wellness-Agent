@@ -1,0 +1,9 @@
+{
+  "name": "knowledge-based-recipe",
+  "task": "Предложи ужин с высоким белком без молочки — сегодня был зал, вечером хочется нормально поесть.",
+  "expect": {
+    "verdict": "approve",
+    "minScore": 8,
+    "usedTools": ["searchKnowledge"]
+  }
+}

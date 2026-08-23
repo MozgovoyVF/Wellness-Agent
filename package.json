@@ -1,0 +1,36 @@
+{
+  "name": "wellness-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Wellness-агент: коуч пишет план, ревьюер проверяет его на безопасность",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "ingest": "tsx scripts/ingest.ts",
+    "replay": "tsx scripts/replay.ts",
+    "eval": "tsx scripts/eval.ts",
+    "mcp:inspect": "tsx scripts/mcp-inspect.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/react": "^4.0.73",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@openai/agents": "^0.15.0",
+    "ai": "^7.0.70",
+    "next": "^16.3.0",
+    "openai": "^7.4.0",
+    "pg": "^8.23.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  }
+}
