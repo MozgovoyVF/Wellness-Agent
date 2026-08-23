@@ -297,6 +297,9 @@ function ToolStep({ step }: { step: Step }) {
       <span className="step__src">
         <KindChip kind={kind} source={source} />
       </span>
+      {/* Действие и имя тула — один поток текста, а не два флекс-элемента: у длинного
+          запроса к базе знаний иначе переносится только текст, а имя уезжает на новую строку
+          к левому краю и повисает там само по себе. */}
       <span className="step__gloss">
         {query !== null ? (
           <>
@@ -306,8 +309,8 @@ function ToolStep({ step }: { step: Step }) {
         ) : (
           (TOOL_LABELS[step.tool.name] ?? 'неизвестный тул')
         )}
+        <span className="step__tool mono">{step.tool.name}</span>
       </span>
-      <span className="step__tool mono">{step.tool.name}</span>
     </>
   );
 }

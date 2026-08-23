@@ -294,6 +294,7 @@ body::before {
   overscroll-behavior: contain;
   padding: 4.4rem 0 1.4rem;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 1.5rem;
   mask-image: linear-gradient(to bottom, transparent 0, #000 2.4rem, #000 calc(100% - 1rem), transparent 100%);
@@ -414,6 +415,7 @@ body::before {
 
 .msg--agent {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
 }
 
@@ -449,6 +451,7 @@ body::before {
 
 .timeline {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.45rem;
   margin: 0;
   padding: 0;
@@ -499,6 +502,7 @@ body::before {
   flex-wrap: wrap;
   gap: 0.35rem 0.5rem;
   align-items: baseline;
+  min-width: 0;
   padding-left: 1.2rem;
   font-size: 0.86rem;
   line-height: 1.5;
@@ -555,18 +559,29 @@ body::before {
   min-width: 7.6rem;
 }
 
-/* Что сделал агент, человеческими словами. Главное на строке — отсюда цвет чернил. */
+/* Что сделал агент, человеческими словами. Главное на строке — отсюда цвет чернил.
+   Не флекс-контейнер: запрос к базе знаний бывает длиннее строки, а текст внутри
+   inline-flex не переносится — он становится флекс-элементом и тянет карточку вширь. */
 .step__gloss {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
+  /* Базис 0, а не auto: с auto гипотетический размер элемента равен ширине текста,
+     и длинный запрос переносится флексом на новую строку целиком вместо того, чтобы
+     сжаться и перенестись внутри себя. */
+  flex: 1 1 0;
+  min-width: 0;
   color: var(--chalk);
   font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.step__gloss .icon {
+  vertical-align: -0.14em;
+  margin-right: 0.1rem;
 }
 
 /* Машинное имя тула идёт после действия и вторым планом: «прочитал профиль» нужно
    всем, read_profile — тем, кто разбирается, и им хватит приглушённого. */
 .step__tool {
+  margin-left: 0.4rem;
   color: var(--chalk);
   opacity: 0.45;
   font-size: 0.72rem;
