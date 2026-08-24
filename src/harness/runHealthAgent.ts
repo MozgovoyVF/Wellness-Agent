@@ -8,13 +8,7 @@
 // тот, кто владеет прогоном целиком. Какие это серверы — здесь не написано и не должно
 // быть: их список живёт в src/mcp/servers.config.ts.
 
-import OpenAI from 'openai';
-import {
-  run,
-  setDefaultOpenAIClient,
-  setOpenAIAPI,
-  setTracingDisabled,
-} from '@openai/agents';
+import { run } from '@openai/agents';
 import { createCoach } from '../agents/healthCoach';
 import { createReviewer } from '../agents/safetyReviewer';
 import { createTriage } from '../agents/safetyTriage';
@@ -30,6 +24,7 @@ import { connectMcpServers, sourceOf } from '../mcp/connectServers';
 import { MCP_TOOLS } from '../mcp/toolNames';
 import { createRetrievalLog, createSearchKnowledgeTool, type Retrieval } from '../rag';
 import { calendarBlock } from './calendar';
+import { configureClient } from './client';
 import { createEmitter, type AgentEventHandler } from './events';
 import { activePromptVersions, loadPrompt, type PromptVersions } from './promptVersions';
 import { createRoundLog, redactPlans, type RoundState } from './rounds';
@@ -111,29 +106,6 @@ export type HealthAgentResult = {
   promptVersions: PromptVersions;
   durationMs: number;
 };
-
-// ─── Клиент ───────────────────────────────────────────────────────────────────
-
-// DeepSeek OpenAI-совместим, поэтому SDK хватает подменённого клиента.
-// chat_completions — потому что Responses API у DeepSeek нет; трейсинг шлёт данные в OpenAI, выключаем.
-// Настраиваем лениво и один раз: на сервере отсутствие ключа — это ошибка запроса, а не повод убить процесс.
-let configured = false;
-
-function configureClient() {
-  if (configured) return;
-
-  if (!process.env.DEEPSEEK_API_KEY) {
-    throw new Error('Не найден DEEPSEEK_API_KEY. Добавь его в .env в корне проекта.');
-  }
-
-  setDefaultOpenAIClient(
-    new OpenAI({ baseURL: 'https://api.deepseek.com', apiKey: process.env.DEEPSEEK_API_KEY }),
-  );
-  setOpenAIAPI('chat_completions');
-  setTracingDisabled(true);
-
-  configured = true;
-}
 
 // ─── Вход агентов ─────────────────────────────────────────────────────────────
 
