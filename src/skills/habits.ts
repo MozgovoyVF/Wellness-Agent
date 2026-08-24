@@ -35,15 +35,17 @@ export function checkHabit(habit: string, date: string): string {
   const sections = parts.slice(1).map((part) => `## ${part}`);
 
   const needle = habit.trim().toLowerCase();
-  const index = sections.findIndex((section) => {
-    const title = titleOf(section).toLowerCase();
-    return title === needle || title.includes(needle);
-  });
+  const titles = sections.map((section) => titleOf(section).toLowerCase());
+  // Два прохода, а не одно условие через ИЛИ: точное совпадение обязано выигрывать
+  // у вхождения, где бы то ни стояло в файле. Одним findIndex побеждает тот, кто выше,
+  // и «растяжка» при секциях «Растяжка вечером» и «Растяжка» отметила бы не ту привычку.
+  const exact = titles.indexOf(needle);
+  const index = exact !== -1 ? exact : titles.findIndex((title) => title.includes(needle));
 
   if (index === -1) {
-    const titles = sections.map(titleOf);
+    const titleTexts = sections.map(titleOf);
     return (
-      `Нет привычки «${habit}». Есть такие: ${titles.join('; ') || 'ни одной'}. ` +
+      `Нет привычки «${habit}». Есть такие: ${titleTexts.join('; ') || 'ни одной'}. ` +
       'Возьми одну из них или ничего не отмечай — заводить новые привычки этот инструмент не умеет.'
     );
   }

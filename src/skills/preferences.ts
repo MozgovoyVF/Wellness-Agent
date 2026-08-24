@@ -20,6 +20,9 @@ export function getPreferences(entries: number): string {
     .filter((line) => line.startsWith(ENTRY_PREFIX));
 
   if (lines.length === 0) return 'Подтверждённых предпочтений пока нет.';
+  // entries <= 0 — это «не показывай ничего», а не «покажи всё»: slice(-0) в JS равен
+  // slice(0) и вернул бы файл целиком. Ошибка тихая, поэтому проверка явная.
+  if (entries <= 0) return 'Подтверждённых предпочтений пока нет.';
   return lines.slice(-entries).join('\n');
 }
 
