@@ -6,13 +6,24 @@
 // Импортировать их из markdownHealthServer.ts нельзя: тело того модуля поднимает stdio-
 // транспорт, и харнесс, потянув константу, запустил бы сервер прямо в своём процессе.
 
-/** Тулы сервера. Значения — это то, что видит модель и что уезжает в toolCalls трейса. */
+/**
+ * Тулы сервера. Значения — это то, что видит модель и что уезжает в toolCalls трейса.
+ *
+ * Из восьми коучу не даются два: append_daily_log и update_preferences. Оба пишут
+ * в долгую память, и оба зовёт харнесс напрямую (src/os/memory.ts). Дневник — это
+ * доказательная база ревьюера, и коуч, дописывающий туда во время планирования,
+ * подделывает собственные доказательства; предпочтения — то, что подтвердил человек,
+ * а не то, что решила модель.
+ */
 export const MCP_TOOLS = {
   readProfile: 'read_profile',
   readRecentLogs: 'read_recent_logs',
   appendDailyLog: 'append_daily_log',
   saveHealthPlan: 'save_health_plan',
   listRecipes: 'list_recipes',
+  readHabits: 'read_habits',
+  checkHabit: 'check_habit',
+  updatePreferences: 'update_preferences',
 } as const;
 
 /**
@@ -44,4 +55,6 @@ export const MCP_RESOURCES = {
   recentLogs: 'logs://recent',
   recipes: 'recipes://all',
   latestPlan: 'plans://latest',
+  habits: 'habits://all',
+  preferences: 'preferences://all',
 } as const;
