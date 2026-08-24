@@ -16,10 +16,12 @@ import type { Gate } from './gate';
 
 export { createGate, type Gate, type GateControl } from './gate';
 export { getProfile } from './profile';
-export { getRecentLog, appendDailyLog, MAX_LOG_DAYS } from './logs';
+export { getRecentLog, appendDailyLog, logDayHeading, MAX_LOG_DAYS } from './logs';
 export { listFavoriteRecipes } from './recipes';
 export { savePlan, planMatchesDisk } from './plans';
 export { LOCAL_TOOLS, LOCAL_WRITE_TOOLS } from './toolNames';
+export { listHabits, checkHabit } from './habits';
+export { getPreferences, appendPreference } from './preferences';
 
 /**
  * Локальные тулы коуча. Гейт передаётся снаружи: харнесс владеет политикой «писать можно
