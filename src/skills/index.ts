@@ -19,6 +19,7 @@ export { getProfile } from './profile';
 export { getRecentLog, appendDailyLog, MAX_LOG_DAYS } from './logs';
 export { listFavoriteRecipes } from './recipes';
 export { savePlan, planMatchesDisk } from './plans';
+export { LOCAL_TOOLS, LOCAL_WRITE_TOOLS } from './toolNames';
 
 /**
  * Локальные тулы коуча. Гейт передаётся снаружи: харнесс владеет политикой «писать можно

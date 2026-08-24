@@ -11,6 +11,7 @@ import { tool } from '@openai/agents';
 import { z } from 'zod';
 import { writeData } from './dataFiles';
 import { LOCKED_MESSAGE, type Gate } from './gate';
+import { LOCAL_TOOLS } from './toolNames';
 
 // Количество в плане: число и единица. Порядок в альтернативе от длинных к коротким,
 // иначе «кг» разберётся как «г». Отрицательный просмотр отсекает «г» внутри «грамм».
@@ -146,7 +147,7 @@ export function generateShoppingList(planMarkdown: string): string {
 
 export function createGenerateShoppingListTool(gate: Gate) {
   return tool({
-    name: 'generateShoppingList',
+    name: LOCAL_TOOLS.generateShoppingList,
     description:
       'Переносит список покупок из плана в отдельный файл data/shopping.md. Передавай markdown ' +
       'плана целиком — тот, что ты написал. Продукты берутся из раздела «## Список покупок», ' +

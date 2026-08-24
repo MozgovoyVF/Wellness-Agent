@@ -4,6 +4,7 @@
 
 import { tool } from '@openai/agents';
 import { z } from 'zod';
+import { LOCAL_TOOLS } from './toolNames';
 
 // Все четыре щадят колено: глубоких приседаний с весом, выпадов и бега здесь нет нигде.
 // Шаблон — не готовый план: коуч подгоняет его под профиль и дневник, а не отдаёт как есть.
@@ -46,7 +47,7 @@ export function suggestWorkoutTemplate(goal: WorkoutGoal): string {
 }
 
 export const suggestWorkoutTemplateTool = tool({
-  name: 'suggestWorkoutTemplate',
+  name: LOCAL_TOOLS.suggestWorkoutTemplate,
   description:
     'Возвращает готовый шаблон тренировки с упражнениями, подходами, повторами и минутами. ' +
     'Все шаблоны уже щадят правое колено. Вызывай, когда в плане есть тренировка: шаблон ' +

@@ -13,7 +13,7 @@
 // неверен для первого же сервера.
 
 import { join } from 'node:path';
-import { NOTION_TOOLS } from './toolNames';
+import { MCP_TOOLS, NOTION_TOOLS } from './toolNames';
 
 // cwd, а не import.meta.url: после сборки этот модуль лежит внутри .next/. По той же
 // причине cwd явно передаётся дочернему процессу — data/ он ищет от рабочей директории.
@@ -77,8 +77,8 @@ export const MCP_SERVERS: McpServerConfig[] = [
     command: process.execPath,
     args: [TSX_CLI, HEALTH_SERVER],
     enabled: true,
-    tools: ['read_profile', 'read_recent_logs', 'list_recipes'],
-    writeTools: ['save_health_plan'],
+    tools: [MCP_TOOLS.readProfile, MCP_TOOLS.readRecentLogs, MCP_TOOLS.listRecipes],
+    writeTools: [MCP_TOOLS.saveHealthPlan],
   },
 
   // Файлы проекта — но не все. Список папок стоит в args, то есть на стороне сервера,
@@ -132,3 +132,13 @@ export const MCP_SERVERS: McpServerConfig[] = [
     writeTools: [NOTION_TOOLS.createPage, NOTION_TOOLS.appendBlocks],
   },
 ];
+
+/**
+ * Все тулы записи всех серверов, одним плоским списком. Нужен там, где политика записи
+ * должна пережить другое сужение: модуль может отнять у коуча любой тул, кроме пишущего —
+ * ими командует только гейт. Считается из того же конфига, что и toolFilter, поэтому
+ * второго списка, который мог бы с ним разъехаться, не появляется.
+ */
+export function mcpWriteToolNames(): string[] {
+  return MCP_SERVERS.flatMap((config) => config.writeTools ?? []);
+}
