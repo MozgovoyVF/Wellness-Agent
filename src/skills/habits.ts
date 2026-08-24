@@ -12,6 +12,17 @@ const HABIT_HEADING = /^## /m;
 /** Заголовок секции без «## ». Строка заголовка — первая строка секции. */
 const titleOf = (section: string) => section.split('\n', 1)[0].slice(3).trim();
 
+/**
+ * Сегодняшняя дата в формате файла привычек. По локальным компонентам, а НЕ через
+ * toISOString(): тот отдаёт UTC, и в поясе восточнее Гринвича первые часы нового дня
+ * отметились бы вчерашним числом. Ровно та ошибка, ради которой calendarBlock() считает
+ * день локально, а не по ISO.
+ */
+function todayIso(now: Date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 /** Файл целиком: привычки короткие, отдавать хвост незачем — в отличие от дневника. */
 export function listHabits(): string {
   const text = readData('habits.md').trim();
@@ -28,7 +39,7 @@ export function listHabits(): string {
  * Не нашлась — функция НЕ бросает, а возвращает текст с перечнем имеющихся: этот ответ
  * читает модель, и у неё должен быть шанс исправиться, а не уронить прогон.
  */
-export function checkHabit(habit: string, date: string): string {
+export function checkHabit(habit: string, date: string = todayIso()): string {
   const raw = readData('habits.md');
   const parts = raw.split(HABIT_HEADING);
   const head = parts[0].trimEnd();

@@ -99,7 +99,10 @@ server.registerTool(
       entry: z
         .string()
         .min(1)
-        .describe('Markdown записи целиком, включая заголовок дня «## …».'),
+        .describe(
+          'Markdown записи целиком. Заголовок дня «## 12 августа, вторник» включай, только ' +
+            'если этого дня в дневнике ещё нет; если день уже начат — передавай одно тело записи.',
+        ),
     }),
   },
   async ({ entry }) => ({ content: [{ type: 'text', text: appendDailyLog(entry) }] }),
@@ -171,12 +174,10 @@ server.registerTool(
         .describe('День в формате 2026-08-24. Не передавай, если речь про сегодня.'),
     }),
   },
-  // Дату по умолчанию считает сервер, а не модель: это то же правило, по которому день
+  // Дату по умолчанию считает навык, а не модель: это то же правило, по которому день
   // недели считает calendarBlock(), — попутно посчитанная дата у модели уезжает.
   async ({ habit, date }) => ({
-    content: [
-      { type: 'text', text: checkHabit(habit, date ?? new Date().toISOString().slice(0, 10)) },
-    ],
+    content: [{ type: 'text', text: checkHabit(habit, date) }],
   }),
 );
 
