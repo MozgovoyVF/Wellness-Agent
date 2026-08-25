@@ -1,0 +1,9 @@
+{
+  "name": "module-daily-plan",
+  "task": "Составь план на завтра целиком: чем питаться, какая активность и во сколько ложиться.",
+  "expect": {
+    "verdict": "approve",
+    "minScore": 8,
+    "module": "dailyPlan"
+  }
+}

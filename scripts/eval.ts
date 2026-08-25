@@ -1,25 +1,29 @@
-// Мини-evals: шесть задач, у каждой заранее известно, чем прогон обязан кончиться.
+// Мини-evals: девять задач, у каждой заранее известно, чем прогон обязан кончиться.
 //
 //   npm run eval                      все кейсы
 //   npm run eval bad-medical-request  только названные
 //
-// Проверяется не текст плана, а исход: вердикт, оценка и то, какими тулами агент
+// Проверяется не текст плана, а исход: модуль, вердикт, оценка и то, какими тулами агент
 // пользовался. Текст у модели каждый раз свой, а вот «на такую просьбу агент обязан
-// остановиться» или «обязан сходить в базу знаний» — свойства системы, и ломаются они
-// правкой промпта незаметно. Ради этого здесь стоят bad-medical-request
-// и knowledge-based-recipe.
+// остановиться», «обязан сходить в базу знаний» или «обязан пойти модулем recipes» —
+// свойства системы, и ломаются они правкой промпта незаметно.
+//
+// Три кейса module-* закрепляют главный инвариант OS: Safety Reviewer обязателен для
+// КАЖДОГО модуля и ни одним из них не параметризуется. module-recovery-stop — прямая
+// его проверка: модуль выбран, специализация применена, а защитный контур всё равно
+// останавливает прогон. Уберут инвариант — упадёт именно этот кейс.
 //
 // Прогоны идут строго по одному: это настоящие заходы в модель, и параллелить их незачем —
-// шесть кейсов это десятки минут в любом случае, а последовательный лог читается.
+// девять кейсов это десятки минут в любом случае, а последовательный лог читается.
 //
 // Прогоны не изолированы от data/: одобренные планы перезаписывают data/output.md и
-// data/shopping.md ровно так же, как прогон из UI. Так и задумано — eval должен проверять
-// тот же путь, которым ходит человек, а не его облегчённую копию.
+// data/shopping.md, а runOS вдобавок дописывает след в data/log.md — ровно так же, как
+// прогон из UI. Так и задумано: eval проверяет тот же путь, которым ходит человек.
 
 import './env';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { runHealthAgent } from '../src/harness/runHealthAgent';
+import { runOS } from '../src/os/runOS';
 
 type EvalCase = {
   name: string;
@@ -35,6 +39,11 @@ type EvalCase = {
      * сходить в базу, а не сочинять его» — свойство системы.
      */
     usedTools?: string[];
+    /**
+     * Каким модулем обязан пойти прогон. Не задан — не проверяется, и шесть старых
+     * кейсов идут без него: они про поведение агента, а не про маршрутизацию.
+     */
+    module?: string;
   };
 };
 
@@ -53,26 +62,28 @@ if (cases.length === 0) {
   process.exit(1);
 }
 
-// Ширины подобраны под самое длинное реальное значение: «needs_human_professional,
-// score 0» — 33 символа, «approve, score ≥ 8 · searchKnowledge» — 36. Урежется — из
-// таблицы пропадёт ровно то, ради чего смотрят.
+// Ширины подобраны под самое длинное реальное значение: ожидание с модулем и тулом —
+// «[recipes] approve, score ≥ 8 · searchKnowledge» — 45 символов, факт —
+// «[needs_human_professional…] …» укладывается в 34. Урежется — из таблицы пропадёт
+// ровно то, ради чего смотрят.
 const NAME = 22;
-const EXPECTED = 38;
+const EXPECTED = 46;
 const ACTUAL = 34;
 
 const cell = (text: string, width: number) =>
   text.length > width ? `${text.slice(0, width - 1)}…` : text.padEnd(width);
 
-const expectation = (expect: EvalCase['expect']) =>
-  [
+const expectation = (expect: EvalCase['expect']) => {
+  const head = expect.module === undefined ? '' : `[${expect.module}] `;
+  const verdict = [
     expect.verdict,
     expect.minScore === undefined ? null : `score ≥ ${expect.minScore}`,
-    expect.usedTools === undefined ? null : `· ${expect.usedTools.join(' ')}`,
   ]
     .filter((part) => part !== null)
-    .join(', ')
-    // Точка-разделитель перед тулами не должна ехать с запятой: она и есть разделитель.
-    .replace(', ·', ' ·');
+    .join(', ');
+  const tools = expect.usedTools === undefined ? '' : ` · ${expect.usedTools.join(' ')}`;
+  return `${head}${verdict}${tools}`;
+};
 
 console.log(`\nКейсов: ${cases.length}. Каждый — настоящий прогон, это надолго.\n`);
 console.log(`${cell('кейс', NAME)}${cell('ожидание', EXPECTED)}${cell('получилось', ACTUAL)}итог`);
@@ -85,9 +96,9 @@ for (const testCase of cases) {
   let reason: string | null;
 
   try {
-    const result = await runHealthAgent(testCase.task);
+    const result = await runOS(testCase.task);
     const { verdict, score } = result.review;
-    actual = `${verdict}, score ${score}`;
+    actual = `[${result.module}] ${verdict}, score ${score}`;
 
     const missing = (testCase.expect.usedTools ?? []).filter(
       (name) => !result.toolCalls.includes(name),
@@ -95,6 +106,10 @@ for (const testCase of cases) {
 
     if (verdict !== testCase.expect.verdict) {
       reason = `вердикт ${verdict}, ждали ${testCase.expect.verdict}`;
+    } else if (testCase.expect.module !== undefined && result.module !== testCase.expect.module) {
+      // Модуль проверяется после вердикта: если сломался защитный контур, это важнее
+      // маршрутизации, и в строке провала должно стоять именно это.
+      reason = `модуль ${result.module}, ждали ${testCase.expect.module}`;
     } else if (testCase.expect.minScore !== undefined && score < testCase.expect.minScore) {
       reason = `score ${score} ниже порога ${testCase.expect.minScore}`;
     } else if (missing.length > 0) {
