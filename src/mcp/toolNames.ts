@@ -46,6 +46,19 @@ export const NOTION_TOOLS = {
 } as const;
 
 /**
+ * Тулы чужого сервера weather, которые мы называем по имени. Имена придуманы не нами —
+ * это то, что отдаёт @cyanheads/open-meteo-mcp-server; проверяются они единственным
+ * способом: `npm run mcp:inspect` печатает список сервера целиком.
+ *
+ * Понадобились, когда те же строки пришлось назвать во втором месте: конфиг решает,
+ * что достанется коучу, а модуль training — что достанется ему внутри модуля.
+ */
+export const WEATHER_TOOLS = {
+  searchLocations: 'openmeteo_search_locations',
+  getForecast: 'openmeteo_get_forecast',
+} as const;
+
+/**
  * Ресурсы сервера. Агенту они не достаются: Agents SDK превращает в тулы только tools,
  * а ресурсы читает лишь тот, кто явно позвал readResource. Здесь они ради MCP Inspector
  * и `npm run mcp:inspect` — показать, что у сервера есть и вторая половина протокола.

@@ -13,7 +13,7 @@
 // неверен для первого же сервера.
 
 import { join } from 'node:path';
-import { MCP_TOOLS, NOTION_TOOLS } from './toolNames';
+import { MCP_TOOLS, NOTION_TOOLS, WEATHER_TOOLS } from './toolNames';
 
 // cwd, а не import.meta.url: после сборки этот модуль лежит внутри .next/. По той же
 // причине cwd явно передаётся дочернему процессу — data/ он ищет от рабочей директории.
@@ -120,7 +120,7 @@ export const MCP_SERVERS: McpServerConfig[] = [
     args: ['-y', '@cyanheads/open-meteo-mcp-server@0.3.4'],
     env: { MCP_TRANSPORT_TYPE: 'stdio', MCP_LOG_LEVEL: 'error' },
     enabled: true,
-    tools: ['openmeteo_search_locations', 'openmeteo_get_forecast'],
+    tools: [WEATHER_TOOLS.searchLocations, WEATHER_TOOLS.getForecast],
     // writeTools нет: сервер read-only по природе. Не всякий сервер одинаково опасен,
     // и гейт нужен там, где есть что испортить, а не везде подряд.
   },
