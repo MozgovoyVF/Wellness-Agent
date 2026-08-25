@@ -22,6 +22,7 @@
 import './env';
 import { MCPServerStdio } from '@openai/agents';
 import { MCP_SERVERS, type McpServerConfig } from '../src/mcp/servers.config';
+import { MODULES, moduleByName } from '../src/os/modules';
 
 const ROOT = process.cwd();
 
@@ -30,7 +31,24 @@ const ROOT = process.cwd();
 // что ресурс отдаёт тот файл, который должен.
 const PREVIEW_LINES = 4;
 
-const readContents = process.argv.slice(2).includes('--read');
+const args = process.argv.slice(2);
+const readContents = args.includes('--read');
+
+// Какой модуль OS примерить. Без флага печатается базовая политика — та, что видит
+// прогон без специализации. С флагом видно, что модуль отнимает сверх неё.
+//
+// Это ЕДИНСТВЕННАЯ проверка списков tools в src/os/modules/: имена там строки, опечатка
+// тихо отнимет у коуча тул, и не поймает её ни сборка, ни прогон — тул просто не появится
+// в списке, а модель не пожалуется на отсутствие того, чего не видела.
+const moduleFlag = args[args.indexOf('--module') + 1];
+const selected = args.includes('--module') ? moduleByName(moduleFlag ?? '') : null;
+
+if (args.includes('--module') && selected === null) {
+  console.error(
+    `Нет модуля «${moduleFlag ?? ''}». Есть: ${MODULES.map((m) => m.name).join(', ')}`,
+  );
+  process.exit(1);
+}
 
 // Описание тула — это текст на несколько строк, и в списке он не нужен целиком:
 // смотрят сюда, чтобы увидеть состав сервера, а не перечитать промпты тулов.
@@ -76,11 +94,19 @@ async function printResource(mcp: MCPServerStdio, uri: string): Promise<void> {
 
 /**
  * Что из тулов сервера достанется коучу — по тем же полям конфига, из которых харнесс
- * строит toolFilter. Считается здесь заново, а не импортируется: в прогоне это функция
- * от живого гейта, а тут нужен статический ответ «когда и при каких условиях».
+ * строит toolFilter, и по списку выбранного модуля. Считается здесь заново, а не
+ * импортируется: в прогоне это функция от живого гейта, а тут нужен статический ответ
+ * «когда и при каких условиях».
+ *
+ * Порядок проверок повторяет buildToolFilter, и это обязательно: ветка записи стоит
+ * первой, поэтому модуль не может отнять пишущий тул. Разойдётся порядок — скрипт начнёт
+ * врать ровно про то, ради чего его смотрят.
  */
 function access(config: McpServerConfig, name: string): string {
   if ((config.writeTools ?? []).includes(name)) return 'после approve';
+  if (selected !== null && selected.tools !== null && !selected.tools.includes(name)) {
+    return `нет (модуль ${selected.name})`;
+  }
   if (config.tools === undefined || config.tools.includes(name)) return 'да';
   return 'нет';
 }
@@ -167,6 +193,15 @@ async function inspect(config: McpServerConfig): Promise<void> {
   } finally {
     await mcp.close();
   }
+}
+
+if (selected !== null) {
+  console.log(
+    `\nМодуль: ${selected.name}` +
+      (selected.tools === null
+        ? ' — тулов не сужает, политика базовая.'
+        : ` — сужает список до: ${selected.tools.join(', ')}.`),
+  );
 }
 
 // Последовательно, а не Promise.all: вывод читают глазами, и перемешанные строки четырёх

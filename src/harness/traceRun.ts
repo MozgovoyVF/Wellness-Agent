@@ -33,6 +33,18 @@ export type RunTrace = {
   task: string;
   promptVersions: PromptVersions;
   model: string;
+  /**
+   * Модуль, которым шёл прогон. У трейсов, снятых до появления OS, поля нет — читающая
+   * сторона обязана это переживать (см. scripts/replay.ts).
+   */
+  module: string;
+  /**
+   * Уверенность роутера, как её назвала модель. На прогон не влияла: по ней выбиралась
+   * наслойка промпта и длина списка тулов, но не вердикт. Лежит в трейсе, чтобы
+   * маршрутизацию можно было разобрать задним числом — например, увидеть, что задачи
+   * определённого вида систематически не дотягивают до порога.
+   */
+  intentConfidence: number;
   rounds: TraceRound[];
   toolCalls: string[];
   /**
@@ -64,6 +76,8 @@ type TracedResult = {
   toolSources: Record<string, string>;
   retrievals: Retrieval[];
   promptVersions: PromptVersions;
+  module: string;
+  intentConfidence: number;
   durationMs: number;
 };
 
@@ -93,6 +107,8 @@ export function traceRun(task: string, result: TracedResult): string | null {
     task,
     promptVersions: result.promptVersions,
     model,
+    module: result.module,
+    intentConfidence: result.intentConfidence,
     // Плана нет там, где его нет и в ответе: при needs_human_professional история уже
     // прошла redactPlans, и защитный контур доезжает до диска сам, отдельной ветки не надо.
     rounds: result.rounds.map((state) => ({
