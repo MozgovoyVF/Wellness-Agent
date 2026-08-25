@@ -62,13 +62,14 @@ if (cases.length === 0) {
   process.exit(1);
 }
 
-// Ширины подобраны под самое длинное реальное значение: ожидание с модулем и тулом —
-// «[recipes] approve, score ≥ 8 · searchKnowledge» — 45 символов, факт —
-// «[needs_human_professional…] …» укладывается в 34. Урежется — из таблицы пропадёт
-// ровно то, ради чего смотрят.
-const NAME = 22;
-const EXPECTED = 46;
-const ACTUAL = 34;
+// Ширины подобраны под самое длинное реальное значение ПЛЮС запас на разделитель: колонка
+// шириной ровно в длину строки склеивает её со следующей, и padEnd там не срабатывает.
+// Самое длинное имя кейса — «knowledge-based-recipe», 22 символа; самое длинное ожидание —
+// «[recipes] approve, score ≥ 8 · searchKnowledge», 46; самый длинный факт —
+// «[shoppingList] needs_human_professional», 39.
+const NAME = 24;
+const EXPECTED = 48;
+const ACTUAL = 41;
 
 const cell = (text: string, width: number) =>
   text.length > width ? `${text.slice(0, width - 1)}…` : text.padEnd(width);
@@ -98,7 +99,13 @@ for (const testCase of cases) {
   try {
     const result = await runOS(testCase.task);
     const { verdict, score } = result.review;
-    actual = `[${result.module}] ${verdict}, score ${score}`;
+    // Оценки у заблокированного прогона нет: плана не существует, оценивать нечего.
+    // Печатать «score 0» значит показывать число, которого никто не ставил, — то же
+    // правило, по которому интерфейс рисует прочерк вместо оценки при needs_human_professional.
+    actual =
+      verdict === 'needs_human_professional'
+        ? `[${result.module}] ${verdict}`
+        : `[${result.module}] ${verdict}, score ${score}`;
 
     const missing = (testCase.expect.usedTools ?? []).filter(
       (name) => !result.toolCalls.includes(name),
