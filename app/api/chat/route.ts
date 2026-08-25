@@ -3,7 +3,7 @@
 // и стримит готовый план. Вся оркестрация осталась в харнессе, как и была.
 
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessageStreamWriter } from 'ai';
-import { runHealthAgent } from '@/src/harness/runHealthAgent';
+import { runOS } from '@/src/os/runOS';
 import type { AgentEvent } from '@/src/harness/events';
 import { stepIds, type ResultData, type Step, type WellnessUIMessage } from '../../chat-protocol';
 
@@ -80,6 +80,17 @@ function createStepWriter(writer: UIMessageStreamWriter<WellnessUIMessage>, run:
   return {
     handle(event: AgentEvent) {
       switch (event.type) {
+        case 'module':
+          // Классификация мгновенна: «в процессе» такого шага не бывает, поэтому сразу
+          // done. Отсюда же иконка в рейке вместо кружка состояния — как у тула.
+          put(ids.module, {
+            kind: 'module',
+            status: 'done',
+            round: null,
+            module: { name: event.name, confidence: event.confidence },
+          });
+          return;
+
         case 'triage':
           // Пройденный триаж — не шаг, а отсутствие препятствия: показывать «задача
           // допущена» на каждый прогон значит забить таймлайн строкой, которая всегда
@@ -146,7 +157,7 @@ function createStepWriter(writer: UIMessageStreamWriter<WellnessUIMessage>, run:
 }
 
 /** Что из результата прогона едет в консоль. План сюда не входит — он уезжает текстом. */
-function toResultData(result: Awaited<ReturnType<typeof runHealthAgent>>): ResultData {
+function toResultData(result: Awaited<ReturnType<typeof runOS>>): ResultData {
   return {
     verdict: result.review.verdict,
     score: result.review.score,
@@ -161,6 +172,8 @@ function toResultData(result: Awaited<ReturnType<typeof runHealthAgent>>): Resul
     toolSources: result.toolSources,
     retrievals: result.retrievals,
     promptVersions: result.promptVersions,
+    module: result.module,
+    intentConfidence: result.intentConfidence,
     durationMs: result.durationMs,
     improved: result.improved,
   };
@@ -192,7 +205,7 @@ export async function POST(request: Request) {
     execute: async ({ writer }) => {
       const steps = createStepWriter(writer, run);
 
-      const result = await runHealthAgent(text, { onEvent: (event) => steps.handle(event) });
+      const result = await runOS(text, { onEvent: (event) => steps.handle(event) });
       steps.finish();
 
       // План стримится ПОСЛЕ цикла и берётся из result.plan, а не из дельт: наружу
