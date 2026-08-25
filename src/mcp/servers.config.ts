@@ -154,3 +154,14 @@ export const MCP_SERVERS: McpServerConfig[] = [
 export function mcpWriteToolNames(): string[] {
   return MCP_SERVERS.flatMap((config) => config.writeTools ?? []);
 }
+
+/**
+ * Тулы чтения, которые модуль отнять не может: без них не выполнить тул записи, а тот
+ * сужение переживает. Сейчас здесь один — поиск страницы в Notion: закрепляющий заход
+ * велит найти «Wellness» и создать внутри неё дочернюю, и право записи без поиска
+ * бесполезно. Живёт рядом с writeTools намеренно: предпосылка путешествует вместе с тем,
+ * ради чего она нужна, и читают её оба — харнесс и mcp:inspect.
+ */
+export function writePrerequisiteToolNames(): string[] {
+  return [NOTION_TOOLS.search];
+}

@@ -21,7 +21,7 @@
 
 import './env';
 import { MCPServerStdio } from '@openai/agents';
-import { MCP_SERVERS, type McpServerConfig } from '../src/mcp/servers.config';
+import { MCP_SERVERS, type McpServerConfig, writePrerequisiteToolNames } from '../src/mcp/servers.config';
 import { MODULES, moduleByName } from '../src/os/modules';
 
 const ROOT = process.cwd();
@@ -101,9 +101,14 @@ async function printResource(mcp: MCPServerStdio, uri: string): Promise<void> {
  * Порядок проверок повторяет buildToolFilter, и это обязательно: ветка записи стоит
  * первой, поэтому модуль не может отнять пишущий тул. Разойдётся порядок — скрипт начнёт
  * врать ровно про то, ради чего его смотрят.
+ *
+ * Сразу за ней — writePrerequisiteToolNames(): тулы, без которых не выполнить тул записи,
+ * хотя сами они не пишут. В харнессе это часть WRITE_TOOLS (см. runHealthAgent.ts), и модуль
+ * их тоже не может отнять — по той же причине, что и сам тул записи.
  */
 function access(config: McpServerConfig, name: string): string {
   if ((config.writeTools ?? []).includes(name)) return 'после approve';
+  if (writePrerequisiteToolNames().includes(name)) return 'да (предпосылка записи)';
   if (selected !== null && selected.tools !== null && !selected.tools.includes(name)) {
     return `нет (модуль ${selected.name})`;
   }

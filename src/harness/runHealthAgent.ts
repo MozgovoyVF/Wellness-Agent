@@ -23,8 +23,8 @@ import {
   savePlan,
 } from '../skills';
 import { connectMcpServers, sourceOf } from '../mcp/connectServers';
-import { MCP_TOOLS, NOTION_TOOLS } from '../mcp/toolNames';
-import { mcpWriteToolNames } from '../mcp/servers.config';
+import { MCP_TOOLS } from '../mcp/toolNames';
+import { mcpWriteToolNames, writePrerequisiteToolNames } from '../mcp/servers.config';
 import { GENERAL, type Module } from '../os/modules';
 import { createRetrievalLog, createSearchKnowledgeTool, type Retrieval } from '../rag';
 import { calendarBlock } from './calendar';
@@ -70,12 +70,15 @@ const PREFERENCE_ENTRIES = 10;
 // только гейт, и модуль, забывший вписать save_health_plan, иначе молча ломал бы сохранение
 // одобренного плана — поломка, которую не поймают ни сборка, ни mcp:inspect.
 //
-// API-post-search стоит здесь по той же причине, хотя сам ничего не пишет. Закрепляющий
-// заход велит коучу найти страницу «Wellness» и создать внутри неё дочернюю: право записи
-// сужение переживает, а без поиска у коуча нет id родителя, и указание проваливается молча.
-// Предпосылка тула записи путешествует вместе с ним — и правило это лежит здесь же, рядом
-// с правилом про сам тул записи, а не в списках модулей, иначе их разъедят при первой правке.
-const WRITE_TOOLS = new Set([...mcpWriteToolNames(), ...LOCAL_WRITE_TOOLS, NOTION_TOOLS.search]);
+// writePrerequisiteToolNames() добавляет сюда же тулы чтения, без которых тул записи не
+// выполнить, хотя сами они не пишут: право записи сужение модулем переживает, а без своей
+// предпосылки указание проваливается молча. Список и его причина лежат в servers.config.ts,
+// рядом с writeTools, а не здесь и не в списках модулей — иначе их разъедут при первой правке.
+const WRITE_TOOLS = new Set([
+  ...mcpWriteToolNames(),
+  ...writePrerequisiteToolNames(),
+  ...LOCAL_WRITE_TOOLS,
+]);
 
 // Порог одобрения: сумма пяти осей чек-листа. Начиная с safetyReviewer.v8 эта цифра
 // не названа в промпте вовсе — ревьюер выносит вердикт качественно, а числовую планку
