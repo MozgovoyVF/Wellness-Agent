@@ -64,13 +64,19 @@ export type MemoryUpdate = {
  * базы знаний — сбой служебной записи не сбой работы.
  */
 export async function updateMemory(update: MemoryUpdate): Promise<void> {
-  const connection = await connectMcpServer('markdown-health');
-  if (connection === null) {
-    console.log('Память не обновлена: сервер markdown-health не поднялся.');
-    return;
-  }
+  let connection: Awaited<ReturnType<typeof connectMcpServer>> = null;
 
   try {
+    // Подъём сервера стоит ВНУТРИ try намеренно. connectMcpServer возвращает null только
+    // когда сервер не положено запускать, а у markdown-health нет requiresEnv — значит
+    // реалистичный отказ здесь не null, а бросок при спавне процесса или рукопожатии.
+    // Снаружи try он улетел бы из runOS и уронил прогон, план которого уже одобрен.
+    connection = await connectMcpServer('markdown-health');
+    if (connection === null) {
+      console.log('Память не обновлена: сервер markdown-health не поднялся.');
+      return;
+    }
+
     const heading = logDayHeading();
 
     // Смотрим, начат ли сегодняшний день. За день человек делает несколько прогонов,
@@ -102,6 +108,14 @@ export async function updateMemory(update: MemoryUpdate): Promise<void> {
   } catch (error) {
     console.log(`Память обновить не удалось (прогон это не отменяет): ${String(error)}`);
   } finally {
-    await connection.close();
+    // Закрытие тоже умеет бросать, а бросок из finally перекрыл бы catch выше и всё-таки
+    // уронил бы прогон — поэтому у него свой guard.
+    if (connection !== null) {
+      try {
+        await connection.close();
+      } catch (error) {
+        console.log(`Сервер памяти не закрылся: ${String(error)}`);
+      }
+    }
   }
 }

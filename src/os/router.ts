@@ -74,7 +74,10 @@ export async function classifyIntent(task: string, ask: AskRouter): Promise<Inte
   if (found === null) return fallback(`нет модуля «${match[1]}»`);
 
   const confidence = Number(match[2].replace(',', '.'));
-  if (!Number.isFinite(confidence)) return fallback(`уверенность не число («${match[2]}»)`);
+  // Диапазон проверяем явно: регекс ограничивает только целую часть, и «1.5» он пропускает.
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+    return fallback(`уверенность вне диапазона 0…1 («${match[2]}»)`);
+  }
 
   if (confidence < MODULE_CONFIDENCE) {
     // Уверенность сохраняем ту, что назвала модель: в трейсе должно быть видно не только
