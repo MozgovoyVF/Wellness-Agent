@@ -111,6 +111,15 @@ function access(config: McpServerConfig, name: string): string {
   return 'нет';
 }
 
+/**
+ * Достаётся ли тул коучу вообще. Отдельно от подписи намеренно: подпись бывает уточнённой
+ * («нет (модуль recipes)»), и сравнивать её со строкой «нет» значит считать неверно —
+ * ровно так шапка начинала противоречить строкам под собой.
+ */
+function reaches(config: McpServerConfig, name: string): boolean {
+  return !access(config, name).startsWith('нет');
+}
+
 /** Ресурсы есть не у всякого сервера: у внешних их обычно нет вовсе. */
 async function printResources(mcp: MCPServerStdio, name: string): Promise<void> {
   let resources;
@@ -178,7 +187,7 @@ async function inspect(config: McpServerConfig): Promise<void> {
 
   try {
     const tools = await mcp.listTools();
-    const reaching = tools.filter((tool) => access(config, tool.name) !== 'нет').length;
+    const reaching = tools.filter((tool) => reaches(config, tool.name)).length;
 
     console.log(`\n  Тулы (${tools.length}, коучу достаётся ${reaching}):`);
     for (const tool of tools) {
