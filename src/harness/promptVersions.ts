@@ -7,8 +7,8 @@ import { join } from 'node:path';
 
 /** Какая версия промпта уходит в прогон. Единственное место, где это решается. */
 export const ACTIVE_PROMPTS = {
-  coach: 'v8',
-  reviewer: 'v8',
+  coach: 'v9',
+  reviewer: 'v9',
   triage: 'v1',
   router: 'v1',
 } as const;
