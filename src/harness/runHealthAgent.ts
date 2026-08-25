@@ -23,7 +23,7 @@ import {
   savePlan,
 } from '../skills';
 import { connectMcpServers, sourceOf } from '../mcp/connectServers';
-import { MCP_TOOLS } from '../mcp/toolNames';
+import { MCP_TOOLS, NOTION_TOOLS } from '../mcp/toolNames';
 import { mcpWriteToolNames } from '../mcp/servers.config';
 import { GENERAL, type Module } from '../os/modules';
 import { createRetrievalLog, createSearchKnowledgeTool, type Retrieval } from '../rag';
@@ -62,13 +62,20 @@ const REVIEWER_LOG_DAYS = 14;
 // здесь, рядом с REVIEWER_LOG_DAYS: это граница прогона, а не свойство файла.
 const PREFERENCE_ENTRIES = 10;
 
-// Тулы записи всех источников — MCP-серверов и локальных навыков. Собираются один раз
-// на модуль, а не на прогон: конфиг за время работы процесса не меняется.
+// Тулы записи всех источников — MCP-серверов и локальных навыков, — и то, без чего запись
+// не выполнить. Собираются один раз на загрузку файла: конфиг за время работы процесса
+// не меняется.
 //
 // Зачем список: модуль OS может отнять у коуча любой тул, КРОМЕ пишущего. Ими командует
-// только гейт, и модуль, забывший вписать save_health_plan, иначе молча ломал бы
-// сохранение одобренного плана — поломка, которую не поймают ни сборка, ни mcp:inspect.
-const WRITE_TOOLS = new Set([...mcpWriteToolNames(), ...LOCAL_WRITE_TOOLS]);
+// только гейт, и модуль, забывший вписать save_health_plan, иначе молча ломал бы сохранение
+// одобренного плана — поломка, которую не поймают ни сборка, ни mcp:inspect.
+//
+// API-post-search стоит здесь по той же причине, хотя сам ничего не пишет. Закрепляющий
+// заход велит коучу найти страницу «Wellness» и создать внутри неё дочернюю: право записи
+// сужение переживает, а без поиска у коуча нет id родителя, и указание проваливается молча.
+// Предпосылка тула записи путешествует вместе с ним — и правило это лежит здесь же, рядом
+// с правилом про сам тул записи, а не в списках модулей, иначе их разъедят при первой правке.
+const WRITE_TOOLS = new Set([...mcpWriteToolNames(), ...LOCAL_WRITE_TOOLS, NOTION_TOOLS.search]);
 
 // Порог одобрения: сумма пяти осей чек-листа. Начиная с safetyReviewer.v8 эта цифра
 // не названа в промпте вовсе — ревьюер выносит вердикт качественно, а числовую планку
