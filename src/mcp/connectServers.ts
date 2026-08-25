@@ -65,8 +65,8 @@ function childEnv(config: McpServerConfig): Record<string, string> | undefined {
 }
 
 /**
- * Фильтр тулов одного сервера, собранный из конфига. Здесь исполняется вся политика
- * доступа, и она вся приезжает данными, а не кодом.
+ * Фильтр тулов одного сервера, собранный из конфига и из политики модуля. Здесь
+ * исполняется вся политика доступа, и она вся приезжает данными, а не кодом.
  *
  * Почему фильтр, а не проверка внутри тула. Локальному навыку хватает замыкания: он
  * спрашивает gate.isUnlocked() в своём execute и возвращает отказ. MCP-тул исполняется
@@ -75,15 +75,28 @@ function childEnv(config: McpServerConfig): Record<string, string> | undefined {
  * Получается строже отказа — позвать то, чего в списке нет, модель не может, — а политика
  * при этом остаётся у нас: сервер по-прежнему не знает, одобрен ли план, и записал бы,
  * если бы его позвали.
+ *
+ * ПОРЯДОК ПРОВЕРОК НЕСУЩИЙ. Ветка writeTools стоит первой, поэтому сужение модулем
+ * до неё не доходит: модуль может отнять любой тул, кроме пишущего. Причина не в
+ * стройности — модуль, забывший вписать save_health_plan, молча ломал бы сохранение
+ * одобренного плана, и не поймали бы этого ни сборка, ни mcp:inspect.
  */
-function buildToolFilter(config: McpServerConfig, gate: Gate) {
+function buildToolFilter(
+  config: McpServerConfig,
+  gate: Gate,
+  allow: (tool: string) => boolean,
+) {
   const writeTools = config.writeTools ?? [];
 
   return async (_context: unknown, tool: { name: string }): Promise<boolean> => {
-    // Тулы записи разрешены дополнительно к tools, но только после approve. Проверка
-    // стоит первой, поэтому write-тул не обязан дублироваться в tools — он назван один раз.
+    // 1. Тулы записи разрешены дополнительно к tools, но только после approve. Проверка
+    //    стоит первой, поэтому write-тул не обязан дублироваться в tools — он назван
+    //    один раз, — и поэтому же его нельзя отнять модулем.
     if (writeTools.includes(tool.name)) return gate.isUnlocked();
-    // Нет allowlist — сервер отдаёт всё, что у него есть.
+    // 2. Сужение модулем OS. По умолчанию пропускает всё: прогон без модуля ведёт себя
+    //    ровно как до появления этого параметра.
+    if (!allow(tool.name)) return false;
+    // 3. Нет allowlist — сервер отдаёт всё, что у него есть.
     if (config.tools === undefined) return true;
     return config.tools.includes(tool.name);
   };
@@ -96,7 +109,11 @@ function buildToolFilter(config: McpServerConfig, gate: Gate) {
  * ждать ответа, должно лежать в одном месте, иначе второй способ подъёма разъедется
  * с первым молча — например, останется с дефолтным пятисекундным таймаутом.
  */
-function buildServer(config: McpServerConfig, gate: Gate | null): MCPServerStdio {
+function buildServer(
+  config: McpServerConfig,
+  gate: Gate | null,
+  allow: (tool: string) => boolean = () => true,
+): MCPServerStdio {
   const gated = (config.writeTools ?? []).length > 0;
 
   return new MCPServerStdio({
@@ -113,7 +130,7 @@ function buildServer(config: McpServerConfig, gate: Gate | null): MCPServerStdio
     cacheToolsList: !gated,
     // Гейта нет — значит, сервер поднят не для агента, и фильтровать нечего: toolFilter
     // решает только то, что увидит модель в списке тулов, а прямой callTool идёт мимо него.
-    ...(gate === null ? {} : { toolFilter: buildToolFilter(config, gate) }),
+    ...(gate === null ? {} : { toolFilter: buildToolFilter(config, gate, allow) }),
   });
 }
 
@@ -155,11 +172,22 @@ export async function connectMcpServer(
  * listTools() отдаёт полный список сервера, без toolFilter: фильтр SDK применяет позже,
  * на стороне раннера. Для карты это то, что нужно, — save_health_plan попадёт в неё,
  * хотя в момент подключения гейт ещё закрыт и коучу этот тул не виден.
+ *
+ * Второй параметр — сужение модулем OS: предикат «виден ли коучу тул с таким именем».
+ * По умолчанию пропускает всё, поэтому вызов с одним аргументом ведёт себя ровно так,
+ * как вёл до появления модулей. Сужать — можно, расширять — нет: предикат стоит ПОСЛЕ
+ * allowlist сервера, а не вместо него, и дать тул, которого нет в конфиге, им нельзя.
+ *
+ * Кэш списка тулов при этом остаётся корректным: модуль на прогон один и в середине
+ * не меняется, поэтому у негейтованного сервера список по-прежнему неизменен.
  */
-export async function connectMcpServers(gate: Gate): Promise<ConnectedMcp> {
+export async function connectMcpServers(
+  gate: Gate,
+  allow: (tool: string) => boolean = () => true,
+): Promise<ConnectedMcp> {
   const configs = MCP_SERVERS.filter(shouldStart);
 
-  const servers = configs.map((config) => buildServer(config, gate));
+  const servers = configs.map((config) => buildServer(config, gate, allow));
 
   await Promise.all(servers.map((server) => server.connect()));
 
