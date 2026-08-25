@@ -15,6 +15,7 @@ npm run eval                       # 6 кейсов из evals/cases, табли
 npm run eval low-energy            # только названные кейсы
 npm run mcp:inspect                # тулы и ресурсы всех серверов конфига, как их видит клиент
 npm run mcp:inspect -- --read      # плюс содержимое каждого ресурса
+npm run mcp:inspect -- --module recipes   # что из тулов отнимает модуль OS
 ```
 
 `mcp:inspect` — дешёвая проверка после правок в `src/mcp/`: он поднимает те же серверы
@@ -29,8 +30,8 @@ npm run mcp:inspect -- --read      # плюс содержимое каждог�
 показать остальные.
 
 **Тулы скрипт не зовёт никогда, ресурсы читает только по `--read`.** Среди тулов есть
-`save_health_plan`, `append_daily_log` и `write_file`: «посмотреть сервер» не должно
-переписывать `data/`.
+`save_health_plan`, `append_daily_log`, `check_habit`, `update_preferences` и `write_file`:
+«посмотреть сервер» не должно переписывать `data/`.
 У чтения ресурса побочных эффектов нет по определению, и флаг там стоит только ради
 читаемости вывода. Ресурсы — единственное, что этой командой вообще проверяется на деле:
 `plans://latest` умеет отвечать, когда `data/output.md` ещё нет, и проверяется это так —
@@ -83,27 +84,36 @@ curl -s -N -X POST http://localhost:3000/api/chat \
 
 ## Архитектура
 
-Три агента и цикл, который ими управляет: триаж решает, стоит ли вообще браться, коуч
-пишет план, ревьюер его судит. Главный принцип: **оркестрация живёт в коде, а не
-в промптах**. Сколько будет раундов, где стоит порог одобрения и что делать с вердиктом,
-решает цикл в [src/harness/runHealthAgent.ts](src/harness/runHealthAgent.ts); промпты про
-это не знают и знать не должны.
+Четыре агента, но цикл управляет только тремя: триаж решает, стоит ли вообще браться,
+коуч пишет план, ревьюер его судит. Четвёртый, роутер намерения, работает до цикла
+и внутри него не участвует — он одним дешёвым заходом выбирает модуль, которым цикл
+дальше воспользуется (раздел «OS» ниже). Главный принцип: **оркестрация живёт в коде,
+а не в промптах**. Сколько будет раундов, где стоит порог одобрения и что делать
+с вердиктом, решает цикл в [src/harness/runHealthAgent.ts](src/harness/runHealthAgent.ts);
+промпты про это не знают и знать не должны.
 
 ```
 app/page.tsx (server)  →  app/chat.tsx (client, useChat)
                               ↓ POST /api/chat            ← стрим, интерфейс ходит сюда
                               ↓ POST /api/agent/run       ← не-стрим, жив для скриптов и страховки
-                          runHealthAgent(task, { minRounds = 1, maxRounds = 3, onEvent? })
+                          runOS(task, { onEvent? })
+                              ↓
+                          classifyIntent(task) → модуль + confidence → событие 'module'
+                              ↓
+                          runHealthAgent(task, { module, intentConfidence, minRounds, maxRounds, onEvent? })
                               ↓
                           triage(task) → HUMAN? → прогон закончен, раундов ноль
                               ↓ WELLNESS
                           поднять MCP-серверы из servers.config.ts (процессы, stdio)
+                          с toolFilter = политика конфига ∩ список модуля
                               ↓
                           coach ⇄ MCP-серверы + src/skills/ + src/rag/ → reviewer → вердикт → (revise? назад к coach)
                                                                           ↓ approve
                                           гейт открыт → закрепляющий заход коуча
                               ↓
                           закрыть MCP-серверы (finally)
+                              ↓
+                          approve? → updateMemory(): append_daily_log + update_preferences мимо агента
 ```
 
 Наружу прогон рассказывает о себе двумя способами, и они не дублируют друг друга.
@@ -160,7 +170,10 @@ app/page.tsx (server)  →  app/chat.tsx (client, useChat)
 | `read_profile` | markdown-health | `getProfile()` — профиль целиком | — |
 | `read_recent_logs` | markdown-health | `getRecentLog(days)` — хвост дневника, 1–14 | — |
 | `list_recipes` | markdown-health | `listFavoriteRecipes()` — `data/recipes.md` | — |
-| `append_daily_log` | markdown-health | `appendDailyLog(entry)` — коучу не даётся никогда | `data/log.md` |
+| `read_habits` | markdown-health | `listHabits()` — привычки и отметки по дням | — |
+| `check_habit` | markdown-health | `checkHabit(habit, date)` — без гейта, см. ниже | `data/habits.md` |
+| `append_daily_log` | markdown-health | `appendDailyLog(entry)` — коучу не даётся никогда, зовёт `src/os/memory.ts` | `data/log.md` |
+| `update_preferences` | markdown-health | `appendPreference(entry)` — коучу не даётся никогда, зовёт `src/os/memory.ts` | `data/preferences.md` |
 | `save_health_plan` | markdown-health | `savePlan(markdown)` | `data/output.md` |
 | `openmeteo_search_locations` | weather | город из профиля → координаты | — |
 | `openmeteo_get_forecast` | weather | прогноз по координатам | — |
@@ -184,7 +197,7 @@ app/page.tsx (server)  →  app/chat.tsx (client, useChat)
 
 | Модуль | Отвечает за |
 |---|---|
-| `src/mcp/markdownHealthServer.ts` | сам сервер: 5 `registerTool`, 4 `registerResource`, stdio |
+| `src/mcp/markdownHealthServer.ts` | сам сервер: 8 `registerTool`, 6 `registerResource`, stdio |
 | `src/mcp/servers.config.ts` | `MCP_SERVERS`: какие серверы поднимать и что из них давать коучу |
 | `src/mcp/connectServers.ts` | `connectMcpServers(gate)` — подъём всех включённых, `toolFilter` из конфига, карта «тул → сервер»; `connectMcpServer(name)` — подъём одного, без гейта и фильтра |
 | `src/mcp/toolNames.ts` | `MCP_TOOLS`, `NOTION_TOOLS` и `MCP_RESOURCES`: имена, объявленные один раз |
@@ -221,6 +234,16 @@ app/page.tsx (server)  →  app/chat.tsx (client, useChat)
 одобрения и порядок раундов остались в харнессе; серверы не знают про прогон ничего,
 в том числе одобрен ли план. По той же причине политика гейта живёт в `servers.config.ts`,
 а не внутри сервера: это не про данные, а про прогон.
+
+| Модуль | Отвечает за |
+|---|---|
+| `src/os/runOS.ts` | весь поток OS: роутинг, прогон, память; шапка держит инвариант про ревьюера |
+| `src/os/router.ts` | `classifyIntent`, `MODULE_CONFIDENCE`, `moduleCatalog`; любая осечка → general |
+| `src/os/memory.ts` | `updateMemory`: две записи после approve, обе через MCP мимо агента |
+| `src/os/preferenceSignal.ts` | маркеры «запомни / понравилось», чистая функция без модели |
+| `src/os/modules/types.ts` | тип `Module` и `ALWAYS` — тулы, которые есть у каждого модуля |
+| `src/os/modules/index.ts` | `MODULES`, `GENERAL`, `moduleByName`; здесь же записан инвариант |
+| `src/agents/intentRouter.ts` | `createRouter(instructions)` — агент без тулов, своя модель |
 
 **Памятей у коуча две, и это главное различие в проекте.** `data/profile.md` и `data/log.md` —
 личная память: кто человек и что с ним происходило. Она достаётся **целиком и точно**,
@@ -282,10 +305,11 @@ app/page.tsx (server)  →  app/chat.tsx (client, useChat)
 Для MCP-тулов описания живут в `registerTool` на сервере.
 
 **Ресурсы агенту не достаются.** `profile://me`, `logs://recent`, `recipes://all`,
-`plans://latest` — вторая половина протокола. Agents SDK превращает в тулы агента только
-`tools`; ресурс надо запросить явно через `readResource`, и коуч этого не делает. Они
-здесь ради `npm run mcp:inspect` и MCP Inspector — показать сервер целиком. Профиль
-приезжает коучу тулом `read_profile`, а не по адресу `profile://me`.
+`plans://latest`, `habits://all`, `preferences://all` — вторая половина протокола. Agents
+SDK превращает в тулы агента только `tools`; ресурс надо запросить явно через
+`readResource`, и коуч этого не делает. Они здесь ради `npm run mcp:inspect` и MCP
+Inspector — показать сервер целиком, все шесть штук. Профиль приезжает коучу тулом
+`read_profile`, а не по адресу `profile://me`.
 
 **Ревьюеру и триажу тулов не даётся никогда — ни локальных, ни MCP.** Оба — контур
 безопасности, и их единственный результат обязан быть вердиктом: агент, способный писать
@@ -354,11 +378,15 @@ app/page.tsx (server)  →  app/chat.tsx (client, useChat)
 и записал бы, если бы его позвали. Прятать её внутрь сервера было бы ошибкой: это не про
 данные, а про прогон.
 
-Тем же фильтром коучу **никогда** не даётся `append_daily_log`: его просто нет в списке
-`tools` у `markdown-health`. Дневник — источник фактов, на который опирается ревьюер,
-проверяя план на выдумки; коуч, дописывающий туда во время планирования, подделывает
-собственную доказательную базу. Сервер тул при этом отдаёт — он виден в
-`npm run mcp:inspect`, и в этом весь смысл: у сервера пять тулов, у коуча четыре.
+Тем же фильтром коучу **никогда** не даются `append_daily_log` и `update_preferences`:
+их просто нет в списке `tools` у `markdown-health`. Дневник — источник фактов, на который
+опирается ревьюер, проверяя план на выдумки; коуч, дописывающий туда во время
+планирования, подделывает собственную доказательную базу. Предпочтения — то, что
+подтвердил человек, а не то, что решила модель, и решение писать их принимает харнесс
+(`src/os/memory.ts`), а не коуч. Сервер оба тула при этом отдаёт — они видны в
+`npm run mcp:inspect`, и в этом весь смысл: у сервера восемь тулов, коучу постоянно
+видны пять (`read_profile`, `read_recent_logs`, `list_recipes`, `read_habits`,
+`check_habit`), и после одобрения к ним добавляется шестой — `save_health_plan`.
 Ровно так же `filesystem` отдаёт четырнадцать, а коуч видит три — `edit_file`, `move_file`
 и остальное в `tools` не вписаны.
 
@@ -806,6 +834,39 @@ markdown построчно, и посимвольный стрим показы
   оба грузились нативным `require`, а не через бандл. У `pg` это отложенный require
   необязательного `pg-native`: собранный бандлером драйвер падает на первом запросе,
   хотя `npm run build` проходит зелёным.
+- **Модуль может только отнимать тул.** Ветка `writeTools` в `buildToolFilter` стоит
+  первой намеренно: поменяешь порядок — модуль, забывший `save_health_plan`, молча
+  перестанет сохранять план, и не поймает этого ни сборка, ни `mcp:inspect`. Порядок
+  проверок в `access` у `scripts/mcp-inspect.ts` обязан повторять `buildToolFilter`,
+  иначе скрипт начнёт врать ровно про то, ради чего его смотрят.
+- **Имена тулов в модулях — константы.** Строка мимо `MCP_TOOLS` / `LOCAL_TOOLS` /
+  `WEATHER_TOOLS` / `SEARCH_KNOWLEDGE` тихо отнимет у модуля тул. Единственная проверка —
+  `npm run mcp:inspect -- --module <имя>`.
+- **Порога роутера в `prompts/router.v1.md` нет.** Вернёшь число в текст — модель начнёт
+  подгонять `confidence` под него, ровно как ревьюер подгонял `score` до v8.
+- **Осечка роутера обязана давать `general`.** Бросать при непонятном ответе нельзя:
+  за роутером стоит рабочее поведение по умолчанию, а за падением не стоит ничего.
+- **`AgentEvent` — контракт трёх слоёв, и вариант `module` не исключение.** Правится
+  в `events.ts`, в `createStepWriter` и в `chat.tsx` одновременно.
+- **Наслойка модуля не повторяет формат плана.** Впишешь в `prompts/modules/*.md` свою
+  структуру разделов — молча сломаешь `plan-markdown.tsx`, `markdownBlocks.ts` или разбор
+  списка покупок.
+- **`description` модуля — вход роутера, а не комментарий.** Правишь описание — меняешь
+  маршрутизацию, и заметят это `evals`, а не человек.
+- **`check_habit` пишет без гейта** — единственное явное исключение в проекте. Завёрнутый
+  ревьюером прогон всё равно оставит след в `data/habits.md`.
+- **Дневниковая запись помечена `### Предложено агентом`.** Уберёшь пометку или её
+  описание из `safetyReviewer.v9` — ревьюер начнёт считать намерения фактами и одобрит
+  план, который «уже сработал», хотя не сработало ничего.
+- **`ROUTER_MODEL` читается внутри функции.** На уровне модуля константа рискует взять
+  дефолт: скрипты грузят `.env` телом первого импорта. Та же причина, что у `traceRun`.
+- **`MODULE_LABELS` и `GENERAL_MODULE` продублированы в `chat.tsx`.** Причина та же, что
+  у `TOOL_LABELS`: консоль клиентская, серверный модуль в браузерный бандл не тянут.
+  Модуль без строки покажется машинным именем; `GENERAL_MODULE`, разъехавшись
+  с `src/os/modules/general.ts`, молча переименует «без специализации» в «модуль: general».
+- **Промпты `healthCoach.v9` и `safetyReviewer.v9` описывают блок предпочтений.**
+  Уберёшь блок из `buildCoachInput` или `reviewerContext`, не тронув промпт, — модель
+  будет ссылаться на то, чего в её входе нет.
 - **`AGENTS.md` в корне перезаписывает сам `next dev`** — свои правила туда не дописывать.
 
 ## Стиль
