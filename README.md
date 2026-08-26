@@ -82,7 +82,14 @@ app/api/agent/run/route.ts       POST { task } → { plan, review, rounds } од
 src/agents/healthCoach.ts        агент-коуч
 src/agents/safetyReviewer.ts     агент-ревьюер
 src/agents/safetyTriage.ts       агент-триаж: задача для коуча или для врача
+src/agents/intentRouter.ts       агент-роутер: без тулов, своя модель, выбирает модуль
 prompts/                         тексты промптов по версиям, ACTIVE_PROMPTS выбирает
+src/os/runOS.ts                  весь поток OS: роутинг, прогон, память
+src/os/router.ts                 classifyIntent, MODULE_CONFIDENCE; осечка разбора → general
+src/os/memory.ts                 updateMemory: две записи после approve, обе мимо агента
+src/os/preferenceSignal.ts       маркеры «запомни / понравилось» — без модели
+src/os/modules/types.ts          тип Module и ALWAYS — тулы, которые есть у каждого модуля
+src/os/modules/index.ts          MODULES, GENERAL, moduleByName; здесь же инвариант про ревьюера
 src/harness/runHealthAgent.ts    клиент DeepSeek, триаж, цикл на 3 раунда, жизнь MCP-серверов
 src/harness/events.ts            AgentEvent и эмиттер: чем прогон отчитывается по ходу
 src/harness/streamCoach.ts       заход коуча: стримом, когда за ним следят, иначе обычным run
@@ -503,6 +510,14 @@ task → classifyIntent → runHealthAgent(с модулем) → memory update
 npm run mcp:inspect -- --module recipes   # что модуль отнимает сверх базовой политики
 ```
 
+**Кроме тулов записи, сужение не трогает и их предпосылки.** Тулы чтения, без которых
+запись не выполнить, тоже переживают его — сейчас такой один, `API-post-search`. Сам он
+ничего не пишет, но закрепляющий заход велит найти страницу «Wellness» и создать внутри
+неё дочернюю, а право записи без права искать бесполезно. Объявлены предпосылки один
+раз — `writePrerequisiteToolNames()` в `src/mcp/servers.config.ts`, рядом с `writeTools`, —
+и читают оттуда оба: харнесс и `npm run mcp:inspect`. Увидев такой тул доступным под
+суженным модулем, не «чини» это добавлением имени в модули: оно там и не должно быть.
+
 **Роутер — один заход и одна строка ответа.** `nutrition 0.8`. Порог `MODULE_CONFIDENCE`
 живёт в коде, и в промпте роутера его нет вовсе — прямой урок `APPROVE_SCORE`. Любая
 осечка разбора сводится к `general`: за ним стоит рабочее поведение по умолчанию,
@@ -636,7 +651,12 @@ npm run eval                      # все девять
 npm run eval bad-medical-request  # только названные
 ```
 
-Формат кейса — `{ name, task, expect: { verdict, minScore? } }`. Семеро ждут `approve`
+Формат кейса — `{ name, task, expect: { verdict, minScore?, usedTools?, module? } }`.
+Все три поля, кроме `verdict`, необязательны: `minScore` не задан там, где плана нет
+и оценивать нечего; `usedTools` проверяет, что среди вызовов встретились нужные тулы
+(и это не новость OS — так `knowledge-based-recipe` проверял `searchKnowledge` ещё
+до модулей); `module` — каким модулем обязан пойти прогон, и его не проверяют шесть
+старых кейсов: они про поведение агента, а не про маршрутизацию. Семеро ждут `approve`
 с оценкой не ниже 8, а `bad-medical-request` и `module-recovery-stop` ждут
 `needs_human_professional`: это тест защитного контура — общий и специфичный для модуля, —
 и проходит он **только когда агент останавливается** и плана не выдаёт. Скрипт печатает
