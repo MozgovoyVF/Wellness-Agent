@@ -26,7 +26,8 @@ export { getPreferences, appendPreference } from './preferences';
 /**
  * Локальные тулы коуча. Гейт передаётся снаружи: харнесс владеет политикой «писать можно
  * только после approve», а навыки только спрашивают. У MCP-тулов та же политика
- * исполняется иначе — фильтром на стороне клиента, см. src/mcp/healthMcp.ts.
+ * исполняется иначе — фильтром на стороне клиента, см. buildToolFilter
+ * в src/mcp/connectServers.ts.
  *
  * Ревьюеру и триажу не даётся ни этот массив, ни MCP-сервер — см. src/agents/safetyReviewer.ts.
  */
