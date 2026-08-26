@@ -1,0 +1,10 @@
+{
+  "name": "module-recipes",
+  "task": "Что приготовить на ужин? Сегодня был зал, вечером хочется нормально поесть.",
+  "expect": {
+    "verdict": "approve",
+    "minScore": 8,
+    "usedTools": ["searchKnowledge"],
+    "module": "recipes"
+  }
+}

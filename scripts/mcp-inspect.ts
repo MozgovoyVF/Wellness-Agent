@@ -21,7 +21,8 @@
 
 import './env';
 import { MCPServerStdio } from '@openai/agents';
-import { MCP_SERVERS, type McpServerConfig } from '../src/mcp/servers.config';
+import { MCP_SERVERS, type McpServerConfig, writePrerequisiteToolNames } from '../src/mcp/servers.config';
+import { MODULES, moduleByName } from '../src/os/modules';
 
 const ROOT = process.cwd();
 
@@ -30,7 +31,24 @@ const ROOT = process.cwd();
 // что ресурс отдаёт тот файл, который должен.
 const PREVIEW_LINES = 4;
 
-const readContents = process.argv.slice(2).includes('--read');
+const args = process.argv.slice(2);
+const readContents = args.includes('--read');
+
+// Какой модуль OS примерить. Без флага печатается базовая политика — та, что видит
+// прогон без специализации. С флагом видно, что модуль отнимает сверх неё.
+//
+// Это ЕДИНСТВЕННАЯ проверка списков tools в src/os/modules/: имена там строки, опечатка
+// тихо отнимет у коуча тул, и не поймает её ни сборка, ни прогон — тул просто не появится
+// в списке, а модель не пожалуется на отсутствие того, чего не видела.
+const moduleFlag = args[args.indexOf('--module') + 1];
+const selected = args.includes('--module') ? moduleByName(moduleFlag ?? '') : null;
+
+if (args.includes('--module') && selected === null) {
+  console.error(
+    `Нет модуля «${moduleFlag ?? ''}». Есть: ${MODULES.map((m) => m.name).join(', ')}`,
+  );
+  process.exit(1);
+}
 
 // Описание тула — это текст на несколько строк, и в списке он не нужен целиком:
 // смотрят сюда, чтобы увидеть состав сервера, а не перечитать промпты тулов.
@@ -76,13 +94,42 @@ async function printResource(mcp: MCPServerStdio, uri: string): Promise<void> {
 
 /**
  * Что из тулов сервера достанется коучу — по тем же полям конфига, из которых харнесс
- * строит toolFilter. Считается здесь заново, а не импортируется: в прогоне это функция
- * от живого гейта, а тут нужен статический ответ «когда и при каких условиях».
+ * строит toolFilter, и по списку выбранного модуля. Считается здесь заново, а не
+ * импортируется: в прогоне это функция от живого гейта, а тут нужен статический ответ
+ * «когда и при каких условиях».
+ *
+ * Буквального повтора порядка buildToolFilter здесь нет и не должно быть — там ветка
+ * записи (1) и allow() модуля (2) конъюнктивны с allowlist сервера (3), и порядок между
+ * (2) и (3) на исход не влияет, только на то, какую причину назвать. Несущая — только
+ * ветка записи: она стоит первой и обязана оставаться первой, потому что это единственная
+ * проверка, которая меняет исход, а не только формулировку отказа (тул записи разрешён
+ * после approve, даже не будучи в tools).
+ *
+ * Дальше порядок выбран так, чтобы называть настоящую причину: базовая политика
+ * (config.tools) идёт раньше writePrerequisiteToolNames() и сужения модулем, иначе
+ * предпосылка записи выглядела бы терминальной веткой и молчала бы про то, что тот же
+ * тул запрещает allowlist сервера — а в buildToolFilter такой тул всё равно упирается
+ * в проверку (3). writePrerequisiteToolNames() — тулы, без которых не выполнить тул
+ * записи, хотя сами они не пишут; модуль их отнять не может по той же причине, что и сам
+ * тул записи, но базовую политику сервера они не переживают.
  */
 function access(config: McpServerConfig, name: string): string {
   if ((config.writeTools ?? []).includes(name)) return 'после approve';
-  if (config.tools === undefined || config.tools.includes(name)) return 'да';
-  return 'нет';
+  if (config.tools !== undefined && !config.tools.includes(name)) return 'нет';
+  if (writePrerequisiteToolNames().includes(name)) return 'да (предпосылка записи)';
+  if (selected !== null && selected.tools !== null && !selected.tools.includes(name)) {
+    return `нет (модуль ${selected.name})`;
+  }
+  return 'да';
+}
+
+/**
+ * Достаётся ли тул коучу вообще. Отдельно от подписи намеренно: подпись бывает уточнённой
+ * («нет (модуль recipes)»), и сравнивать её со строкой «нет» значит считать неверно —
+ * ровно так шапка начинала противоречить строкам под собой.
+ */
+function reaches(config: McpServerConfig, name: string): boolean {
+  return !access(config, name).startsWith('нет');
 }
 
 /** Ресурсы есть не у всякого сервера: у внешних их обычно нет вовсе. */
@@ -152,7 +199,7 @@ async function inspect(config: McpServerConfig): Promise<void> {
 
   try {
     const tools = await mcp.listTools();
-    const reaching = tools.filter((tool) => access(config, tool.name) !== 'нет').length;
+    const reaching = tools.filter((tool) => reaches(config, tool.name)).length;
 
     console.log(`\n  Тулы (${tools.length}, коучу достаётся ${reaching}):`);
     for (const tool of tools) {
@@ -167,6 +214,15 @@ async function inspect(config: McpServerConfig): Promise<void> {
   } finally {
     await mcp.close();
   }
+}
+
+if (selected !== null) {
+  console.log(
+    `\nМодуль: ${selected.name}` +
+      (selected.tools === null
+        ? ' — тулов не сужает, политика базовая.'
+        : ` — сужает список до: ${selected.tools.join(', ')}.`),
+  );
 }
 
 // Последовательно, а не Promise.all: вывод читают глазами, и перемешанные строки четырёх

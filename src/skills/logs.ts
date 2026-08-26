@@ -13,6 +13,18 @@ const DAY_HEADING = /^## /m;
 
 export const MAX_LOG_DAYS = 14;
 
+// Формат заголовка дня. Он же разбирается регуляркой DAY_HEADING выше — писать и читать
+// один формат должен один модуль. С календарным блоком порядок слов не совпадает
+// намеренно: calendarBlock() даёт «суббота, 8 августа», дневник размечен «8 августа,
+// суббота», и приводить одно к другому значило бы менять формат существующего файла.
+const dayMonth = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' });
+const weekdayName = new Intl.DateTimeFormat('ru-RU', { weekday: 'long' });
+
+/** Заголовок сегодняшнего дня для дневника: «## 24 августа, понедельник». */
+export function logDayHeading(now: Date = new Date()): string {
+  return `## ${dayMonth.format(now)}, ${weekdayName.format(now)}`;
+}
+
 /**
  * Последние `days` дней дневника. Всё, что стоит до первого «## » (заголовок файла),
  * отбрасывается: это не день, а шапка, и место в контексте она занимает зря.

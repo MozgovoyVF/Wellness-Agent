@@ -16,14 +16,18 @@ import type { Gate } from './gate';
 
 export { createGate, type Gate, type GateControl } from './gate';
 export { getProfile } from './profile';
-export { getRecentLog, appendDailyLog, MAX_LOG_DAYS } from './logs';
+export { getRecentLog, appendDailyLog, logDayHeading, MAX_LOG_DAYS } from './logs';
 export { listFavoriteRecipes } from './recipes';
 export { savePlan, planMatchesDisk } from './plans';
+export { LOCAL_TOOLS, LOCAL_WRITE_TOOLS } from './toolNames';
+export { listHabits, checkHabit } from './habits';
+export { getPreferences, appendPreference } from './preferences';
 
 /**
  * Локальные тулы коуча. Гейт передаётся снаружи: харнесс владеет политикой «писать можно
  * только после approve», а навыки только спрашивают. У MCP-тулов та же политика
- * исполняется иначе — фильтром на стороне клиента, см. src/mcp/healthMcp.ts.
+ * исполняется иначе — фильтром на стороне клиента, см. buildToolFilter
+ * в src/mcp/connectServers.ts.
  *
  * Ревьюеру и триажу не даётся ни этот массив, ни MCP-сервер — см. src/agents/safetyReviewer.ts.
  */

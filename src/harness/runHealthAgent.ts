@@ -1,37 +1,43 @@
 // Оркестратор харнесса: собирает клиент, промпты, агентов, MCP-сервер и цикл в один прогон.
 // Вся оркестрация живёт здесь, в коде: сколько будет раундов — не меньше минимума и не
 // больше максимума — и что делать с вердиктом, решает цикл ниже, а не текст промптов.
-// Единственная точка входа: сюда ходит роут app/api/agent/run.
+// Не единственная точка входа: роуты и evals идут через runOS (src/os/runOS.ts) — он
+// добавляет маршрутизацию модуля и обновление памяти. Напрямую эту функцию зовут только
+// replay и код, которому маршрутизация не нужна.
 //
 // Здесь же — жизненный цикл MCP-серверов: данные и инструменты коуч берёт из отдельных
 // процессов, и поднять их перед первым раундом и погасить после последнего может только
 // тот, кто владеет прогоном целиком. Какие это серверы — здесь не написано и не должно
 // быть: их список живёт в src/mcp/servers.config.ts.
 
-import OpenAI from 'openai';
-import {
-  run,
-  setDefaultOpenAIClient,
-  setOpenAIAPI,
-  setTracingDisabled,
-} from '@openai/agents';
+import { run } from '@openai/agents';
 import { createCoach } from '../agents/healthCoach';
 import { createReviewer } from '../agents/safetyReviewer';
 import { createTriage } from '../agents/safetyTriage';
 import {
   createGate,
+  getPreferences,
   getProfile,
   getRecentLog,
   localCoachTools,
+  LOCAL_WRITE_TOOLS,
   planMatchesDisk,
   savePlan,
 } from '../skills';
 import { connectMcpServers, sourceOf } from '../mcp/connectServers';
 import { MCP_TOOLS } from '../mcp/toolNames';
+import { mcpWriteToolNames, writePrerequisiteToolNames } from '../mcp/servers.config';
+import { GENERAL, type Module } from '../os/modules';
 import { createRetrievalLog, createSearchKnowledgeTool, type Retrieval } from '../rag';
 import { calendarBlock } from './calendar';
+import { configureClient } from './client';
 import { createEmitter, type AgentEventHandler } from './events';
-import { activePromptVersions, loadPrompt, type PromptVersions } from './promptVersions';
+import {
+  activePromptVersions,
+  loadModulePrompt,
+  loadPrompt,
+  type PromptVersions,
+} from './promptVersions';
 import { createRoundLog, redactPlans, type RoundState } from './rounds';
 import { finalRound, improvedAcrossRounds } from './score';
 import { runCoach } from './streamCoach';
@@ -52,6 +58,29 @@ const MAX_TURNS = 12;
 // Сколько дней дневника видит ревьюер. Заведомо больше, чем возьмёт коуч: увидев меньше,
 // ревьюер завернёт как выдумку факт, который коуч честно взял из дня за пределами окна.
 const REVIEWER_LOG_DAYS = 14;
+
+// Сколько записей предпочтений едет в контекст коуча и ревьюера. Хвост, а не файл
+// целиком: он растёт с каждым «запомни», а место в контексте конечно. Константа стоит
+// здесь, рядом с REVIEWER_LOG_DAYS: это граница прогона, а не свойство файла.
+const PREFERENCE_ENTRIES = 10;
+
+// Тулы записи всех источников — MCP-серверов и локальных навыков, — и то, без чего запись
+// не выполнить. Собираются один раз на загрузку файла: конфиг за время работы процесса
+// не меняется.
+//
+// Зачем список: модуль OS может отнять у коуча любой тул, КРОМЕ пишущего. Ими командует
+// только гейт, и модуль, забывший вписать save_health_plan, иначе молча ломал бы сохранение
+// одобренного плана — поломка, которую не поймают ни сборка, ни mcp:inspect.
+//
+// writePrerequisiteToolNames() добавляет сюда же тулы чтения, без которых тул записи не
+// выполнить, хотя сами они не пишут: право записи сужение модулем переживает, а без своей
+// предпосылки указание проваливается молча. Список и его причина лежат в servers.config.ts,
+// рядом с writeTools, а не здесь и не в списках модулей — иначе их разъедут при первой правке.
+const WRITE_TOOLS = new Set([
+  ...mcpWriteToolNames(),
+  ...writePrerequisiteToolNames(),
+  ...LOCAL_WRITE_TOOLS,
+]);
 
 // Порог одобрения: сумма пяти осей чек-листа. Начиная с safetyReviewer.v8 эта цифра
 // не названа в промпте вовсе — ревьюер выносит вердикт качественно, а числовую планку
@@ -77,7 +106,22 @@ export type RoundLimits = {
  * Он опционален, и в этом весь смысл — без него прогон ведёт себя ровно как прежде,
  * включая тот же не-стриминговый вызов коуча (см. streamCoach.ts).
  */
-export type RunOptions = RoundLimits & { onEvent?: AgentEventHandler };
+export type RunOptions = RoundLimits & {
+  onEvent?: AgentEventHandler;
+  /**
+   * Конфигурация модуля OS: промпт-наслойка и суженный список тулов. Не передан —
+   * general, то есть поведение до появления модулей. Необязателен намеренно: по этому
+   * пути ходят replay и прямые вызовы харнесса, и они не обязаны знать про роутер.
+   */
+  module?: Module;
+  /**
+   * Уверенность роутера, как её назвала модель. На прогон не влияет вовсе — едет
+   * в результат и оттуда в трейс, чтобы по трейсу можно было разобрать маршрутизацию.
+   * Приезжает параметром, хотя runOS знает её раньше: трейс пишется из finish(),
+   * единственной точки сборки результата, и второй способ записи завёл бы второй формат.
+   */
+  intentConfidence?: number;
+};
 
 export type HealthAgentResult = {
   /** null, если задача требует живого специалиста — такой план наружу не отдаём. */
@@ -109,31 +153,12 @@ export type HealthAgentResult = {
   retrievals: Retrieval[];
   /** С какими версиями промптов шёл этот прогон. */
   promptVersions: PromptVersions;
+  /** Модуль, которым шёл прогон. При прямом вызове харнесса — 'general'. */
+  module: string;
+  /** Уверенность роутера. При прямом вызове харнесса — 0. */
+  intentConfidence: number;
   durationMs: number;
 };
-
-// ─── Клиент ───────────────────────────────────────────────────────────────────
-
-// DeepSeek OpenAI-совместим, поэтому SDK хватает подменённого клиента.
-// chat_completions — потому что Responses API у DeepSeek нет; трейсинг шлёт данные в OpenAI, выключаем.
-// Настраиваем лениво и один раз: на сервере отсутствие ключа — это ошибка запроса, а не повод убить процесс.
-let configured = false;
-
-function configureClient() {
-  if (configured) return;
-
-  if (!process.env.DEEPSEEK_API_KEY) {
-    throw new Error('Не найден DEEPSEEK_API_KEY. Добавь его в .env в корне проекта.');
-  }
-
-  setDefaultOpenAIClient(
-    new OpenAI({ baseURL: 'https://api.deepseek.com', apiKey: process.env.DEEPSEEK_API_KEY }),
-  );
-  setOpenAIAPI('chat_completions');
-  setTracingDisabled(true);
-
-  configured = true;
-}
 
 // ─── Вход агентов ─────────────────────────────────────────────────────────────
 
@@ -146,10 +171,16 @@ const issueList = (issues: string[]) => issues.map((issue) => `- ${issue}`).join
  * раундов ещё не пройден — усиливается. Просить «устрани замечания» там, где замечаний
  * нет, значит толкнуть коуча переписать одобренное вслепую.
  */
-function buildCoachInput(task: string, calendar: string, previous: RoundState | null): string {
-  // Календарь идёт первым и в каждом раунде: день недели — единственный факт плана,
-  // который коучу неоткуда взять, а на втором раунде он нужен ровно так же, как на первом.
-  const base = `${calendar}\n\n## Задача\n${task}`;
+function buildCoachInput(
+  task: string,
+  calendar: string,
+  preferences: string,
+  previous: RoundState | null,
+): string {
+  // Календарь и предпочтения идут первыми и в каждом раунде: день недели коучу неоткуда
+  // взять, а на втором раунде он нужен ровно так же, как на первом.
+  const base =
+    `${calendar}\n\n## Подтверждённые предпочтения\n${preferences}\n\n## Задача\n${task}`;
   if (previous === null) return base;
 
   const withPlan = `${base}\n\n## Твой прошлый план\n${previous.plan}`;
@@ -235,12 +266,23 @@ function enforceApproveThreshold(review: Review): Review {
 
 export async function runHealthAgent(
   task: string,
-  { minRounds = DEFAULT_MIN_ROUNDS, maxRounds = DEFAULT_MAX_ROUNDS, onEvent }: RunOptions = {},
+  {
+    minRounds = DEFAULT_MIN_ROUNDS,
+    maxRounds = DEFAULT_MAX_ROUNDS,
+    onEvent,
+    module,
+    intentConfidence = 0,
+  }: RunOptions = {},
 ): Promise<HealthAgentResult> {
   // Прогон без единого раунда нечем закончить: результата, по которому строится
   // вердикт и оценка, просто не появится.
   if (minRounds < 1) throw new Error('minRounds должен быть не меньше 1.');
   if (maxRounds < minRounds) throw new Error('maxRounds должен быть не меньше minRounds.');
+
+  // Модуль — конфигурация, а не агент: он меняет промпт коуча и длину списка его тулов,
+  // и ничего больше. Ревьюер, триаж, порог одобрения и порядок раундов про него не знают
+  // и знать не должны — см. шапку src/os/modules/index.ts.
+  const active = module ?? GENERAL;
 
   configureClient();
 
@@ -269,11 +311,18 @@ export async function runHealthAgent(
   // не меняется, а меняющийся под ногами календарь дал бы коучу и ревьюеру разные «сегодня».
   const calendar = calendarBlock();
 
+  // Предпочтения кладёт харнесс, а не тул, — по той же причине, что и календарь: блок
+  // короткий, всегда уместен, и решение «сходить ли за ним» коуч принимал бы каждый раз
+  // заново. Ревьюеру он нужен не меньше: без него выбор, продиктованный записанным
+  // предпочтением, выглядит выдумкой ровно настолько, насколько нечем проверить.
+  const preferences = getPreferences(PREFERENCE_ENTRIES);
+
   // Ревьюер получает тот же календарь, и это обязательно: он проверяет план на выдумки,
   // а без своей даты не только пропустит неверный день недели, но и завернёт верный —
   // «19 августа среда» выглядит выдумкой ровно настолько, насколько нечем проверить.
   const reviewerContext =
-    `${calendar}\n\n## Профиль\n${getProfile()}\n\n## Дневник\n${getRecentLog(REVIEWER_LOG_DAYS)}\n\n## Задача\n${task}`;
+    `${calendar}\n\n## Подтверждённые предпочтения\n${preferences}\n\n` +
+    `## Профиль\n${getProfile()}\n\n## Дневник\n${getRecentLog(REVIEWER_LOG_DAYS)}\n\n## Задача\n${task}`;
 
   const askReviewer = async (input: string) =>
     String((await run(reviewer, input)).finalOutput ?? '');
@@ -300,6 +349,8 @@ export async function runHealthAgent(
       toolSources,
       retrievals: retrievals.entries(),
       promptVersions,
+      module: active.name,
+      intentConfidence,
       durationMs: Date.now() - startedAt,
     };
 
@@ -330,17 +381,34 @@ export async function runHealthAgent(
   // сколько цикл, и закрываются в finally, иначе упавший прогон оставил бы висеть чужие
   // процессы. Какие именно серверы поднимутся, харнесс не знает и знать не должен — это
   // написано в src/mcp/servers.config.ts.
-  const mcp = await connectMcpServers(gate);
+  // Сужение модулем. Только отнимает: предикат стоит ПОСЛЕ allowlist серверов, а не
+  // вместо него, поэтому дать тул, которого нет в servers.config.ts, модулем нельзя.
+  // Тулы записи выведены из-под сужения — ими командует только гейт.
+  const allow = (name: string) =>
+    WRITE_TOOLS.has(name) || active.tools === null || active.tools.includes(name);
+
+  const mcp = await connectMcpServers(gate, allow);
   toolSources = mcp.toolSources;
 
   try {
+    // Промпт коуча — база плюс наслойка модуля, а не подмена. Формат плана разбирают три
+    // независимых парсера (app/plan-markdown.tsx, src/mcp/markdownBlocks.ts и sourceText
+    // в src/skills/shopping.ts), и описан он должен быть один раз — иначе восемь модулей
+    // дают восемь мест для тихого расхождения.
+    const instructions =
+      active.promptFile === null
+        ? loadPrompt('coach', promptVersions.coach)
+        : `${loadPrompt('coach', promptVersions.coach)}\n\n${loadModulePrompt(active.promptFile)}`;
+
     // Тулы коуча собираются здесь, а не в src/skills/: RAG — не навык работы с данными
-    // человека, а другой источник и другая ответственность, и складывать его в тот же
-    // модуль значило бы стереть границу, ради которой всё это разделено. Что коучу
-    // доступно, и так решает харнесс.
+    // человека, а другой источник и другая ответственность. Локальные фильтруются тем же
+    // предикатом, что и MCP-шные: политика одна, исполняется в двух местах только потому,
+    // что тулы живут в разных процессах.
     const coach = createCoach(
-      loadPrompt('coach', promptVersions.coach),
-      [...localCoachTools(gate), createSearchKnowledgeTool(retrievals)],
+      instructions,
+      [...localCoachTools(gate), createSearchKnowledgeTool(retrievals)].filter((skill) =>
+        allow(skill.name),
+      ),
       mcp.servers,
     );
 
@@ -355,7 +423,7 @@ export async function runHealthAgent(
         kind:
           previous === null ? 'first' : previous.review.verdict === 'approve' ? 'reinforce' : 'revise',
       });
-      const coachOutput = await runCoach(coach, buildCoachInput(task, calendar, previous), {
+      const coachOutput = await runCoach(coach, buildCoachInput(task, calendar, preferences, previous), {
         emitter,
         round,
         maxTurns: MAX_TURNS,

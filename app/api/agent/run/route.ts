@@ -1,4 +1,4 @@
-import { runHealthAgent } from '@/src/harness/runHealthAgent';
+import { runOS } from '@/src/os/runOS';
 
 // Агенты читают и пишут файлы в data/ — нужен nodejs-рантайм, не edge.
 export const runtime = 'nodejs';
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await runHealthAgent(task.trim());
+    const result = await runOS(task.trim());
     return Response.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Неизвестная ошибка.';

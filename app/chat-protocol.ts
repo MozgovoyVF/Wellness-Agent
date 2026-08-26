@@ -13,7 +13,7 @@ import type { Review } from '@/src/harness/validateReview';
 import type { Retrieval } from '@/src/rag';
 
 /** Что за шаг стоит в таймлайне. Один тип на все шаги: таймлайн — плоский список. */
-export type StepKind = 'triage' | 'tool' | 'plan' | 'review' | 'finalize';
+export type StepKind = 'module' | 'triage' | 'tool' | 'plan' | 'review' | 'finalize';
 
 export type Step = {
   kind: StepKind;
@@ -27,6 +27,13 @@ export type Step = {
    * и второй раунд бывает обоими.
    */
   phase?: 'first' | 'revise' | 'reinforce';
+  /**
+   * Только у kind: 'module'. Какой модуль выбрал роутер и насколько был уверен.
+   * name === 'general' означает «без специализации»: либо роутер так решил, либо
+   * уверенность не дотянула до порога. Отдельного флага под это нет — он выводится
+   * из имени.
+   */
+  module?: { name: string; confidence: number };
   /**
    * Только у kind: 'tool'. args — сырая строка, как её отдал SDK; source — имя
    * MCP-сервера или null у локального тула. Источник едет в самом шаге, а не берётся
@@ -61,6 +68,8 @@ export type ResultData = {
   toolSources: Record<string, string>;
   retrievals: Retrieval[];
   promptVersions: PromptVersions;
+  module: string;
+  intentConfidence: number;
   durationMs: number;
   improved: boolean;
 };
@@ -79,6 +88,7 @@ export type WellnessUIMessage = UIMessage<never, { step: Step; result: ResultDat
  * вердикт первого. Проверять это живым багом дорого, префикс стоит нисколько.
  */
 export const stepIds = (run: string) => ({
+  module: `${run}:module`,
   triage: `${run}:triage`,
   plan: (round: number) => `${run}:plan-${round}`,
   review: (round: number) => `${run}:review-${round}`,

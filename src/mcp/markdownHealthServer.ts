@@ -1,5 +1,6 @@
 // MCP-сервер над markdown-файлами из data/. Отдельный процесс, транспорт stdio: харнесс
-// поднимает его на прогон и закрывает после (src/mcp/healthMcp.ts).
+// поднимает его на прогон и закрывает после (connectMcpServers в src/mcp/connectServers.ts,
+// вызывается из src/harness/runHealthAgent.ts).
 //
 // Почему сервер, а не как раньше — прямые функции в тулах агента. Раньше каждый источник
 // данных подключался руками: написать функцию, обернуть её в tool(), вписать в массив,
@@ -23,11 +24,17 @@ import { getProfile } from '../skills/profile';
 import { appendDailyLog, getRecentLog, MAX_LOG_DAYS } from '../skills/logs';
 import { listFavoriteRecipes } from '../skills/recipes';
 import { savePlan } from '../skills/plans';
+import { checkHabit, listHabits } from '../skills/habits';
+import { appendPreference, getPreferences } from '../skills/preferences';
 import { MCP_RESOURCES, MCP_TOOLS } from './toolNames';
 
 // Сколько дней отдаёт ресурс logs://recent. У тула days спрашивается у вызывающего,
 // а у ресурса параметров нет — URI фиксированный, значит окно приходится выбрать здесь.
 const RESOURCE_LOG_DAYS = 7;
+
+// Сколько записей отдаёт ресурс preferences://all. Причина та же, что у RESOURCE_LOG_DAYS:
+// у тула окно спрашивается у вызывающего, а у ресурса параметров нет — URI фиксированный.
+const RESOURCE_PREFERENCE_ENTRIES = 20;
 
 const server = new McpServer({
   name: 'markdown-health',
@@ -85,14 +92,18 @@ server.registerTool(
   {
     title: 'Дописать запись в дневник',
     description:
-      'Дописывает запись в конец data/log.md, ничего не затирая. Передавай готовый markdown ' +
-      'записи вместе с заголовком дня в формате «## 12 августа, вторник» — формат дневника ' +
-      'задаёт файл, и без заголовка запись сольётся с предыдущим днём.',
+      'Дописывает запись в конец data/log.md, ничего не затирая. Заголовок дня в формате ' +
+      '«## 12 августа, вторник» передавай только тогда, когда этого дня в дневнике ещё нет: ' +
+      'если день уже начат, запись без заголовка просто продолжит его, а второй такой же ' +
+      'заголовок расколол бы один день надвое.',
     inputSchema: z.object({
       entry: z
         .string()
         .min(1)
-        .describe('Markdown записи целиком, включая заголовок дня «## …».'),
+        .describe(
+          'Markdown записи целиком. Заголовок дня «## 12 августа, вторник» включай, только ' +
+            'если этого дня в дневнике ещё нет; если день уже начат — передавай одно тело записи.',
+        ),
     }),
   },
   async ({ entry }) => ({ content: [{ type: 'text', text: appendDailyLog(entry) }] }),
@@ -126,6 +137,68 @@ server.registerTool(
     inputSchema: z.object({}),
   },
   async () => ({ content: [{ type: 'text', text: listFavoriteRecipes() }] }),
+);
+
+server.registerTool(
+  MCP_TOOLS.readHabits,
+  {
+    title: 'Привычки и отметки по дням',
+    description:
+      'Возвращает список привычек человека с отметками по дням: что отмечено выполненным, ' +
+      'что пропущено, а про какие дни ничего не известно. Вызывай, когда задача про привычки, ' +
+      'режим или регулярность: по отметкам видно, где привычка держится, а где рассыпалась, ' +
+      'и это разные поводы для плана. Профиль говорит, чего человек хочет, дневник — что было, ' +
+      'а этот список — что он сам считает нужным делать каждый день.',
+    inputSchema: z.object({}),
+  },
+  async () => ({ content: [{ type: 'text', text: listHabits() }] }),
+);
+
+server.registerTool(
+  MCP_TOOLS.checkHabit,
+  {
+    title: 'Отметить привычку выполненной',
+    description:
+      'Отмечает привычку выполненной за день. Вызывай только тогда, когда человек сам сказал, ' +
+      `что сделал её, — это запись факта, а не части плана. Название бери из ${MCP_TOOLS.readHabits}: ` +
+      'достаточно куска заголовка («зарядка»), но выдуманную привычку инструмент не заведёт ' +
+      'и вернёт список имеющихся. Дата необязательна — без неё отмечается сегодняшний день.',
+    inputSchema: z.object({
+      habit: z
+        .string()
+        .min(1)
+        .describe('Название привычки или его узнаваемая часть, как она стоит в списке привычек.'),
+      date: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .optional()
+        .describe('День в формате 2026-08-24. Не передавай, если речь про сегодня.'),
+    }),
+  },
+  // Дату по умолчанию считает навык, а не модель: это то же правило, по которому день
+  // недели считает calendarBlock(), — попутно посчитанная дата у модели уезжает.
+  async ({ habit, date }) => ({
+    content: [{ type: 'text', text: checkHabit(habit, date) }],
+  }),
+);
+
+server.registerTool(
+  MCP_TOOLS.updatePreferences,
+  {
+    title: 'Записать подтверждённое предпочтение',
+    description:
+      'Дописывает строку в data/preferences.md — долгую память о том, что человек подтвердил ' +
+      'явно («запомни», «понравилось»). Этот инструмент коучу не даётся никогда: его зовёт ' +
+      'харнесс после одобренного прогона. Он есть на сервере, потому что сервер — интерфейс ' +
+      'к данным, а кто и когда имеет право писать, решает клиент.',
+    inputSchema: z.object({
+      entry: z
+        .string()
+        .min(1)
+        .describe('Готовая строка записи целиком, начиная с «- » и с датой в формате 2026-08-24.'),
+    }),
+  },
+  async ({ entry }) => ({ content: [{ type: 'text', text: appendPreference(entry) }] }),
 );
 
 // ─── Ресурсы ──────────────────────────────────────────────────────────────────
@@ -180,6 +253,24 @@ server.registerResource(
       return textResource(uri, 'Плана пока нет: ни один прогон не дошёл до одобрения.');
     }
   },
+);
+
+server.registerResource(
+  'habits',
+  MCP_RESOURCES.habits,
+  { title: 'Привычки', description: 'data/habits.md целиком.', mimeType: 'text/markdown' },
+  async (uri) => textResource(uri, listHabits()),
+);
+
+server.registerResource(
+  'preferences',
+  MCP_RESOURCES.preferences,
+  {
+    title: 'Подтверждённые предпочтения',
+    description: `Последние ${RESOURCE_PREFERENCE_ENTRIES} записей data/preferences.md.`,
+    mimeType: 'text/markdown',
+  },
+  async (uri) => textResource(uri, getPreferences(RESOURCE_PREFERENCE_ENTRIES)),
 );
 
 // ─── Запуск ───────────────────────────────────────────────────────────────────

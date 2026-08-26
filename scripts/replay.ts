@@ -67,6 +67,10 @@ row('оценка', `${before.finalScore}/10`, `${after.finalScore}/10`);
 row('раундов', String(before.rounds.length), String(after.rounds.length));
 row('промпты', versions(before.promptVersions), versions(after.promptVersions));
 row('модель', before.model, process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash');
+// Прочерк — для трейсов, снятых до появления OS. Новый прогон идёт через runHealthAgent
+// напрямую, без роутера, поэтому «стало» здесь всегда general: replay сравнивает прогон,
+// а не маршрутизацию.
+row('модуль', before.module ?? '—', after.module);
 row('время', seconds(before.durationMs), seconds(after.durationMs));
 
 // Тулы и замечания в колонку не влезают: тулов бывает десяток, замечания — целые фразы.

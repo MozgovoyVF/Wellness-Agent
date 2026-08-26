@@ -13,7 +13,7 @@
 // неверен для первого же сервера.
 
 import { join } from 'node:path';
-import { NOTION_TOOLS } from './toolNames';
+import { MCP_TOOLS, NOTION_TOOLS, WEATHER_TOOLS } from './toolNames';
 
 // cwd, а не import.meta.url: после сборки этот модуль лежит внутри .next/. По той же
 // причине cwd явно передаётся дочернему процессу — data/ он ищет от рабочей директории.
@@ -66,19 +66,31 @@ export type McpServerConfig = {
 };
 
 export const MCP_SERVERS: McpServerConfig[] = [
-  // Наш сервер. Данные человека: профиль, дневник, рецепты, сохранение плана.
-  // append_daily_log в списке отсутствует намеренно — и это единственный способ его
-  // не дать. Дневник это источник фактов, на который опирается ревьюер, проверяя план
-  // на выдумки; коуч, дописывающий туда во время планирования, подделывает собственную
-  // доказательную базу. Сервер тул при этом отдаёт — он виден в `npm run mcp:inspect`,
-  // и в этом весь смысл: у сервера пять тулов, у коуча четыре.
+  // Наш сервер. Данные человека: профиль, дневник, рецепты, привычки, предпочтения,
+  // сохранение плана. append_daily_log и update_preferences в списке отсутствуют
+  // намеренно — и это единственный способ их не дать. Дневник это источник фактов,
+  // на который опирается ревьюер, проверяя план на выдумки; коуч, дописывающий туда
+  // во время планирования, подделывает собственную доказательную базу; предпочтения —
+  // то, что подтвердил человек, а не то, что решила модель. Сервер оба тула при этом
+  // отдаёт — они видны в `npm run mcp:inspect`, и в этом весь смысл: у сервера восемь
+  // тулов, у коуча пять — append_daily_log и update_preferences не даются никогда.
   {
     name: 'markdown-health',
     command: process.execPath,
     args: [TSX_CLI, HEALTH_SERVER],
     enabled: true,
-    tools: ['read_profile', 'read_recent_logs', 'list_recipes'],
-    writeTools: ['save_health_plan'],
+    tools: [
+      MCP_TOOLS.readProfile,
+      MCP_TOOLS.readRecentLogs,
+      MCP_TOOLS.listRecipes,
+      MCP_TOOLS.readHabits,
+      // Гейта у check_habit нет, и это осознанное исключение, единственное в проекте:
+      // отметка привычки — факт, который человек сообщил в запросе, а не запись плана,
+      // и ждать одобрения плана ей нечего. Цена признана и записана: завёрнутый ревьюером
+      // прогон всё равно может оставить след в data/habits.md.
+      MCP_TOOLS.checkHabit,
+    ],
+    writeTools: [MCP_TOOLS.saveHealthPlan],
   },
 
   // Файлы проекта — но не все. Список папок стоит в args, то есть на стороне сервера,
@@ -108,7 +120,7 @@ export const MCP_SERVERS: McpServerConfig[] = [
     args: ['-y', '@cyanheads/open-meteo-mcp-server@0.3.4'],
     env: { MCP_TRANSPORT_TYPE: 'stdio', MCP_LOG_LEVEL: 'error' },
     enabled: true,
-    tools: ['openmeteo_search_locations', 'openmeteo_get_forecast'],
+    tools: [WEATHER_TOOLS.searchLocations, WEATHER_TOOLS.getForecast],
     // writeTools нет: сервер read-only по природе. Не всякий сервер одинаково опасен,
     // и гейт нужен там, где есть что испортить, а не везде подряд.
   },
@@ -132,3 +144,24 @@ export const MCP_SERVERS: McpServerConfig[] = [
     writeTools: [NOTION_TOOLS.createPage, NOTION_TOOLS.appendBlocks],
   },
 ];
+
+/**
+ * Все тулы записи всех серверов, одним плоским списком. Нужен там, где политика записи
+ * должна пережить другое сужение: модуль может отнять у коуча любой тул, кроме пишущего —
+ * ими командует только гейт. Считается из того же конфига, что и toolFilter, поэтому
+ * второго списка, который мог бы с ним разъехаться, не появляется.
+ */
+export function mcpWriteToolNames(): string[] {
+  return MCP_SERVERS.flatMap((config) => config.writeTools ?? []);
+}
+
+/**
+ * Тулы чтения, которые модуль отнять не может: без них не выполнить тул записи, а тот
+ * сужение переживает. Сейчас здесь один — поиск страницы в Notion: закрепляющий заход
+ * велит найти «Wellness» и создать внутри неё дочернюю, и право записи без поиска
+ * бесполезно. Живёт рядом с writeTools намеренно: предпосылка путешествует вместе с тем,
+ * ради чего она нужна, и читают её оба — харнесс и mcp:inspect.
+ */
+export function writePrerequisiteToolNames(): string[] {
+  return [NOTION_TOOLS.search];
+}

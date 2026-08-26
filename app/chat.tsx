@@ -57,6 +57,26 @@ const TOOL_LABELS: Record<string, string> = {
 const SEARCH_KNOWLEDGE = 'searchKnowledge';
 const NOTION_CREATE_PAGE = 'API-post-page';
 
+// Имя модуля → подпись по-русски. Продублировано из src/os/modules/ по той же причине,
+// что и TOOL_LABELS: консоль клиентская, серверный модуль в браузерный бандл не тянут.
+// Модуль без строки здесь покажется своим машинным именем — это не поломка, но и не то,
+// что человек должен читать.
+const MODULE_LABELS: Record<string, string> = {
+  general: 'без специализации',
+  dailyPlan: 'план на день',
+  nutrition: 'питание',
+  recipes: 'что приготовить',
+  training: 'тренировки',
+  recovery: 'восстановление',
+  habits: 'привычки',
+  shoppingList: 'список покупок',
+  knowledge: 'объяснение',
+};
+
+// Здесь это не подпись, а условие: по нему строка таймлайна и трейс различают
+// «роутер выбрал модуль» и «специализации нет». Продублировано из src/os/modules/general.ts.
+const GENERAL_MODULE = 'general';
+
 // Откуда взялся инструмент. Для агента разницы нет — он зовёт их одинаково, — и ровно
 // поэтому её стоит показать: иначе не видно, что половина инструментов живёт в отдельных
 // процессах за стандартным протоколом, а один ходит в чужую базу по сети.
@@ -197,6 +217,21 @@ function IconBraces() {
   );
 }
 
+/**
+ * Метка шага маршрутизации. Компас, а не четвёртый вид инструмента: это не источник
+ * тула, а решение о направлении, и в KIND_ICONS ему делать нечего. Силуэт выбран так же,
+ * как остальные три, — чтобы читался при 14 px.
+ */
+function IconCompass() {
+  return (
+    <svg className="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.6" />
+      <path d="m15.4 8.6-2.2 4.6-4.6 2.2 2.2-4.6z" />
+    </svg>
+  );
+}
+
 const KIND_ICONS: Record<ToolKind, () => React.JSX.Element> = {
   mcp: IconPlug,
   rag: IconSparkle,
@@ -259,6 +294,29 @@ function readRun(message: WellnessUIMessage) {
 }
 
 // ─── Таймлайн ─────────────────────────────────────────────────────────────────
+
+function ModuleStep({ step }: { step: Step }) {
+  if (!step.module) return null;
+
+  const general = step.module.name === GENERAL_MODULE;
+  const label = MODULE_LABELS[step.module.name] ?? step.module.name;
+
+  // Порядок тот же, что у строки тула: метка вида в рейке, действие человеческими
+  // словами, машинное имя вторым планом. Уверенность стоит справа и приглушена —
+  // это число для того, кто разбирается, а не для того, кто читает план.
+  return (
+    <>
+      <span className="step__kind" aria-hidden="true">
+        <IconCompass />
+      </span>
+      <span className="step__gloss">
+        {general ? 'без специализации' : `модуль: ${label}`}
+        <span className="step__tool mono">{step.module.name}</span>
+      </span>
+      <span className="step__conf mono">{step.module.confidence.toFixed(1)}</span>
+    </>
+  );
+}
 
 function PlanStep({ step }: { step: Step }) {
   const word =
@@ -345,7 +403,10 @@ function Timeline({ steps, live }: { steps: Step[]; live: boolean }) {
     <ol className="timeline">
       {steps.map((step, index) => (
         <li className={`step step--${step.kind} is-${step.status}`} key={index}>
-          {step.kind !== 'tool' && <span className="step__mark" aria-hidden="true" />}
+          {step.kind !== 'tool' && step.kind !== 'module' && (
+            <span className="step__mark" aria-hidden="true" />
+          )}
+          {step.kind === 'module' && <ModuleStep step={step} />}
           {step.kind === 'plan' && <PlanStep step={step} />}
           {step.kind === 'tool' && <ToolStep step={step} />}
           {step.kind === 'review' && <ReviewStep step={step} />}
@@ -481,8 +542,13 @@ function Trace({ result }: { result: ResultData }) {
       )}
 
       <p className="trace__meta mono">
-        промпты: coach {result.promptVersions.coach} · reviewer {result.promptVersions.reviewer} ·
-        triage {result.promptVersions.triage}
+        модуль {result.module}
+        {result.module !== GENERAL_MODULE && ` (${MODULE_LABELS[result.module] ?? result.module})`}
+        {' · уверенность '}
+        {result.intentConfidence.toFixed(1)}
+        {' · промпты: coach '}
+        {result.promptVersions.coach} · reviewer {result.promptVersions.reviewer} · triage{' '}
+        {result.promptVersions.triage} · router {result.promptVersions.router}
         {result.improved && ' · оценка выросла за раунды'}
       </p>
     </details>
